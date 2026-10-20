@@ -12,7 +12,7 @@ cat > "$A/hyze-chromium.desktop" <<'DE'
 Type=Application
 Name=Chromium
 Icon=chromium
-Exec=chromium --user-data-dir=%h/.config/hyze-chromium --remote-debugging-port=9222 --no-first-run --no-default-browser-check --password-store=basic %U
+Exec=/usr/local/bin/hyze-chromium %U
 DE
 cat > "$A/hyze-terminal.desktop" <<'DE'
 [Desktop Entry]

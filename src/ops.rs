@@ -91,7 +91,7 @@ fn ensure_template_image(tpl: &str) -> Result<PathBuf> {
         name: format!("_build-{tpl}"), template: tpl.into(), cpus: 4, memory_mb: 4096, disk_gb: 16,
         ssh_port: free_port()?, qmp_port: free_port()?, ports: vec![], user: "agent".into(), view_port: 0, view_ro_port: 0,
         auto_suspend_secs: 0, expires_at: None, on_timeout: "pause".into(), meta: BTreeMap::new(),
-        volumes: vec![], vault: false, always_on: false,
+        volumes: vec![], vault: false, always_on: false, timezone: None, lang: None,
     };
     let _ = remove(&m); // sobra de build interrompido
     m.save()?;
@@ -133,6 +133,7 @@ pub fn create(o: CreateOpts) -> Result<Machine> {
         auto_suspend_secs: if o.always_on { 0 } else { o.auto_suspend.unwrap_or(1800) },
         expires_at: o.timeout.filter(|t| *t > 0).map(|t| now() + t), on_timeout: o.on_timeout,
         meta: o.meta, volumes: o.volumes, vault: o.vault, always_on: o.always_on,
+        timezone: host_timezone(), lang: host_lang(),
     };
     m.save()?;
     if let Err(e) = provision(&m, &backing, false, o.wait) {

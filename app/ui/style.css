@@ -190,3 +190,16 @@ body.web .win { max-width: 1280px; max-height: 800px; margin: 20px auto; border-
 .ctx .ci.danger { color: var(--red); } .ctx .ci.danger svg { color: var(--red); }
 .ctx .ci.danger.hl { background: var(--red); color: #fff; } .ctx .ci.danger.hl svg { color: #fff; }
 .ctx hr { border: 0; height: 1px; background: var(--palline); margin: 4px 9px; }
+
+/* atualização */
+.updpill { height: 24px; padding: 0 10px 0 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex: none; }
+.updpill:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+#upd .kscrim { z-index: 95; align-content: center; padding-top: 0; place-items: center; }
+.updbox { width: min(420px, calc(100vw - 48px)); padding: 18px 18px 14px; border-radius: 14px; background: var(--pal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); box-shadow: var(--palshadow); animation: pop .16s ease-out; }
+.updbox .uh { display: flex; align-items: center; gap: 12px; }
+.updbox .ui { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex: none; }
+.updbox .uh b { display: block; font-size: 14px; font-weight: 600; }
+.updbox .uh span:last-child { color: var(--fg-2); font-size: 12.5px; } .updbox .uh i { font-style: normal; color: var(--fg); font-weight: 500; }
+.updbox ul { margin: 14px 0 2px 4px; padding-left: 16px; color: var(--fg-2); font-size: 12.5px; line-height: 1.6; }
+.updbox .uf { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.updbox .ubusy { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 18px 0 6px; color: var(--fg-2); font-size: 12.5px; }

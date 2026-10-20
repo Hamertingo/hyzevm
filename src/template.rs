@@ -45,7 +45,7 @@ pub fn base_image() -> Result<PathBuf> {
 
 
 fn unit(desc: &str, after: &str, exec: &str, env: &str) -> String {
-    format!("[Unit]\nDescription={desc}\nAfter={after}\n[Service]\nUser=agent\n{env}ExecStart={exec}\nRestart=always\nRestartSec=2\n[Install]\nWantedBy=multi-user.target\n")
+    format!("[Unit]\nDescription={desc}\nAfter={after}\n[Service]\nUser=agent\n{env}ExecStart={exec}\nRestart=always\nRestartSec=2\nTimeoutStopSec=5\n[Install]\nWantedBy=multi-user.target\n")
 }
 
 fn write_file(path: &str, content: &str, out: &mut String) { write_file_mode(path, content, "0644", out) }
@@ -64,6 +64,14 @@ pub fn write_seed(m: &Machine, pubkey: &str, full: bool) -> Result<()> {
         "#cloud-config\nhostname: {name}\nmanage_etc_hosts: true\nusers:\n  - name: {user}\n    sudo: ALL=(ALL) NOPASSWD:ALL\n    shell: /bin/bash\n{groups}    ssh_authorized_keys:\n      - {pubkey}\nssh_pwauth: false\n",
         name = m.name, user = m.user, pubkey = pubkey.trim(),
         groups = if m.template == "minimal" { "" } else { "    groups: [docker]\n" });
+    // Fuso e idioma do computador do usuário: o IP é local e o navegador não deve dizer "UTC / en-US".
+    if let Some(tz) = m.timezone.as_deref().filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c))) {
+        ud += &format!("timezone: {tz}\n");
+    }
+    let mut early_files = String::new();
+    if let Some(l) = m.lang.as_deref().filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')) {
+        write_file("/etc/hyze-lang", l, &mut early_files);
+    }
     let mut runcmd: Vec<String> = vec![];
     if full {
         let mut pkgs: Vec<&str> = BASE_PKGS.to_vec();
@@ -73,12 +81,14 @@ pub fn write_seed(m: &Machine, pubkey: &str, full: bool) -> Result<()> {
         // Sem pacotes "recomendados": instala bem menos e bem mais rápido.
         ud += "apt:\n  conf: |\n    APT::Install-Recommends \"false\";\n    Acquire::Languages \"none\";\n";
         ud += "write_files:\n";
+        ud += &early_files; early_files.clear();
         if desktop {
             let mut wf = String::new();
             write_file("/etc/systemd/system/hyze-xvfb.service",
                 &unit("Xvfb :99", "network.target", "/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp", ""), &mut wf);
             write_file("/etc/systemd/system/hyze-openbox.service",
                 &unit("Openbox", "hyze-xvfb.service", "/usr/bin/openbox", "Environment=DISPLAY=:99\n"), &mut wf);
+            write_file_mode("/usr/local/bin/hyze-chromium", include_str!("hyze-chromium.sh"), "0755", &mut wf);
             write_file_mode("/usr/local/bin/hyze-session", include_str!("hyze-session.sh"), "0755", &mut wf);
             write_file("/etc/systemd/system/hyze-session.service",
                 &unit("Sessão do desktop (fundo + dock)", "hyze-openbox.service", "/usr/local/bin/hyze-session", "Environment=DISPLAY=:99\n"), &mut wf);
@@ -95,8 +105,6 @@ pub fn write_seed(m: &Machine, pubkey: &str, full: bool) -> Result<()> {
             runcmd.push("ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html".into());
             runcmd.push("systemctl daemon-reload".into());
             runcmd.push("systemctl enable --now hyze-xvfb hyze-openbox hyze-session hyze-vnc hyze-novnc hyze-vnc-ro hyze-novnc-ro".into());
-        } else {
-            ud += "  []\n";
         }
         runcmd.push("systemctl enable --now docker || true".into());
         runcmd.push("mkdir -p /data".into());
@@ -109,6 +117,7 @@ pub fn write_seed(m: &Machine, pubkey: &str, full: bool) -> Result<()> {
             "blkid {dev} >/dev/null 2>&1 || mkfs.ext4 -q -L {v} {dev}; mkdir -p /data/{v}; mountpoint -q /data/{v} || mount {dev} /data/{v}; chown {u}: /data/{v}",
             u = m.user));
     }
+    if !early_files.is_empty() { ud += "write_files:\n"; ud += &early_files; }
     runcmd.push("touch /var/lib/hyzevm-ready".into());
     ud += "runcmd:\n";
     for c in runcmd { ud += &format!("  - [ sh, -c, \"{}\" ]\n", c.replace('\\', "\\\\").replace('"', "\\\"")); }

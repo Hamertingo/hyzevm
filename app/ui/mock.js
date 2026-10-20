@@ -45,6 +45,9 @@ if (!window.__TAURI__) {
     set_always_on: async ({ name, on }) => { const m = machines.find((x) => x.name === name); m.always_on = on; },
     takeover_done: async ({ name }) => { machines.find((x) => x.name === name).takeover = null; },
     exec: async ({ command }) => ({ code: 0, stdout: command.startsWith("uname") ? "Linux build-ci 6.1.0-44-arm64 aarch64 GNU/Linux\n" : "ok\n", stderr: "" }),
+    update_check: async () => ({ version: "0.2.0", current: "0.1.0", notes: "Atualização automática dentro do app\nFuso e idioma das máquinas iguais aos do seu computador\nCorreções no menu de botão direito", page: "https://github.com/Hamertingo/hyzevm/releases", can_install: true }),
+    update_install: async () => { await wait(2500); },
+    open_url: async () => {},
     desktop_type: async () => {}, save_screenshot: async () => "/tmp/x.png", open_terminal: async () => {},
   };
   window.__TAURI__ = {

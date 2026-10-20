@@ -38,6 +38,11 @@ pub struct Machine {
     /// 24/7: sobe sozinha com o host (`hyzevm up`), reinicia se cair e nunca auto-suspende.
     #[serde(default)]
     pub always_on: bool,
+    /// Fuso e idioma do guest (copiados do computador do usuário na criação).
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub lang: Option<String>,
     /// Escreve o vault nesta máquina no boot.
     #[serde(default = "yes")]
     pub vault: bool,
@@ -131,4 +136,23 @@ pub fn valid_name(n: &str) -> Result<()> {
 /// Porta TCP livre no loopback.
 pub fn free_port() -> Result<u16> {
     Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+}
+
+/// Fuso horário do computador (ex.: America/Sao_Paulo). None se não der para descobrir.
+pub fn host_timezone() -> Option<String> {
+    if let Ok(tz) = std::env::var("TZ") { if tz.contains('/') { return Some(tz.trim_start_matches(':').to_string()); } }
+    let link = std::fs::read_link("/etc/localtime").ok()?;
+    let s = link.to_string_lossy();
+    s.split("zoneinfo/").nth(1).map(|z| z.to_string()).filter(|z| z.contains('/') || z == "UTC")
+}
+
+/// Idioma do computador no formato BCP-47 (ex.: pt-BR). None se não der para descobrir.
+pub fn host_lang() -> Option<String> {
+    let raw = if cfg!(target_os = "macos") {
+        std::process::Command::new("defaults").args(["read", "-g", "AppleLocale"]).output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else { ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty() && v != "C" && v != "POSIX")) }?;
+    let base = raw.split(['.', '@']).next()?.replace('_', "-");
+    let ok = base.len() >= 2 && base.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    ok.then_some(base)
 }

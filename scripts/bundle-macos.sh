@@ -11,8 +11,8 @@ cp target/release/hyzevm "$APP/Contents/SharedSupport/hyzevm"
 # ícone .icns a partir do PNG
 ISET=$(mktemp -d)/HyzeVM.iconset; mkdir -p "$ISET"
 for s in 16 32 64 128 256 512; do
-  magick app/icons/icon.png -resize ${s}x${s} "$ISET/icon_${s}x${s}.png"
-  magick app/icons/icon.png -resize $((s*2))x$((s*2)) "$ISET/icon_${s}x${s}@2x.png"
+  sips -z $s $s app/icons/icon.png --out "$ISET/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s*2)) $((s*2)) app/icons/icon.png --out "$ISET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ISET" -o "$APP/Contents/Resources/HyzeVM.icns"
 cat > "$APP/Contents/Info.plist" <<'PL'

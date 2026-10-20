@@ -91,6 +91,12 @@ create **minimal (Debian puro): ~10 s**, RAM ociosa ~214 MB, retomar de suspend 
 
 `skills/hyzevm/SKILL.md` ensina o agente (Claude Code, Codex…) a usar a máquina: criar/reusar, exec/cp, browser por snapshot, takeover (nunca contornar CAPTCHA/2FA), vault, snapshots, fluxo de postagem. `hyzevm skill install [--dir]` copia para `~/.claude/skills/hyzevm`; `hyzevm skill print` imprime. Embutida no binário (`include_str!`).
 
+## Atualização e fuso/idioma
+
+- `src/update.rs`: consulta `GET /repos/Hamertingo/hyzevm/releases` (inclui pré-lançamentos), cache de 6 h em `~/.hyzevm/update.json`, baixa o asset, **confere SHA-256 contra `SHA256SUMS.txt` (sem isso não instala)**. CLI: `hyzevm update [--check]` troca o binário; aviso discreto em `ls`/visão geral (cache; se velho, `_checkupdate` em segundo plano). App: pílula `vX.Y.Z` no topo → folha → `update_install` baixa `HyzeVM-macos-arm64.zip`, agenda `swap.sh` (espera o PID sair, troca o .app, `xattr -cr`, `open`) e fecha. Só macOS arm64 troca o app sozinho; nos demais abre a página de download. `HYZEVM_UPDATE_API` aponta para uma release falsa (teste).
+- Release: `./scripts/release.sh 0.1.1` (bump em Cargo.toml e app/Cargo.toml, tag, push) → CI publica 5 binários, `HyzeVM-macos-arm64.zip` e `SHA256SUMS.txt`.
+- Fuso/idioma: copiados do computador na criação (`store::host_timezone/host_lang`) → cloud-init `timezone:` + `/etc/hyze-lang`; Chromium usa `--lang`/`--accept-lang` (helper `/usr/local/bin/hyze-chromium`, mesmo perfil/porta do `hyzevm browser`). `hyzevm locale <m>` ajusta uma existente. Bug corrigido: o atalho do Chromium na dock usava `%h` (não existe em .desktop → perfil em `/.config`).
+
 ## Roadmap
 
 1. Imagens `base`/`desktop` prontas nos releases do CI (baixar em vez de construir)

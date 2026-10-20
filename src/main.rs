@@ -3,7 +3,7 @@ mod menubar;
 #[cfg(target_os = "macos")]
 mod menubar_view;
 
-use hyzevm::{browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
+use hyzevm::{update, browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -142,6 +142,13 @@ enum Cmd {
     /// Skill que ensina agentes a usar o hyzevm (Claude Code, Codex…)
     #[command(subcommand)]
     Skill(SkillCmd),
+    /// Ajusta fuso e idioma da máquina (padrão: os do seu computador)
+    Locale { name: String, #[arg(long)] tz: Option<String>, #[arg(long)] lang: Option<String> },
+    /// Procura e instala a versão mais nova (GitHub Releases, com verificação SHA-256)
+    Update { /// Só verifica; não instala
+        #[arg(long)] check: bool },
+    #[command(name = "_checkupdate", hide = true)]
+    CheckUpdate,
     /// Diagnóstico do ambiente
     Doctor { #[arg(long)] json: bool },
     /// Ícone na barra de menus do Mac (preview das telas ao passar o mouse)
@@ -312,6 +319,17 @@ fn main() {
     }
 }
 
+/// Aviso discreto (só lê o cache; se estiver velho, atualiza em segundo plano para a próxima vez).
+fn update_hint() {
+    if let Some(r) = update::cached_newer() {
+        ui::hint(&format!("nova versão v{} disponível — hyzevm update", r.version));
+    } else if update::cache_stale() {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::process::Command::new(exe).arg("_checkupdate").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+        }
+    }
+}
+
 fn overview() -> Result<()> {
     println!("{}  {}", ui::bold("hyzevm"), ui::dim(&format!("v{} · uma máquina Linux própria para cada agente", env!("CARGO_PKG_VERSION"))));
     println!();
@@ -321,6 +339,7 @@ fn overview() -> Result<()> {
         println!("  {}  {}", ui::cyan("hyzevm create agente"), ui::dim("Debian 12 pronto em ~10 s"));
         println!("  {}  {}", ui::cyan("hyzevm create agente --template desktop --always-on"), ui::dim("com tela, 24 h"));
     } else { print_machines(&ms); println!(); println!("  {}", ui::dim("hyzevm --help para ver todos os comandos")); }
+    update_hint();
     Ok(())
 }
 
@@ -365,7 +384,7 @@ fn run() -> Result<i32> {
                     "template": m.template, "cpus": m.cpus, "memory_mb": m.memory_mb, "always_on": m.always_on, "meta": m.meta})).collect();
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else if ms.is_empty() { ui::hint("nenhuma máquina — crie com `hyzevm create <nome>`"); }
-            else { print_machines(&ms); }
+            else { print_machines(&ms); update_hint(); }
         }
         Cmd::Get { name, json } => {
             let m = Machine::load(&name)?;
@@ -546,6 +565,36 @@ fn run() -> Result<i32> {
             std::fs::write(d.join("SKILL.md"), SKILL_MD)?;
             ui::ok(&format!("skill instalada em {}", d.display()));
             ui::hint("o agente passa a conhecer o hyzevm na próxima sessão");
+        }
+        Cmd::Locale { name, tz, lang } => {
+            let mut m = Machine::load(&name)?;
+            let tz = tz.or_else(store::host_timezone);
+            let lang = lang.or_else(store::host_lang);
+            let m2 = live(&name)?;
+            let mut sc = String::new();
+            if let Some(t) = &tz { sc += &format!("sudo timedatectl set-timezone {}\n", ssh::sh_quote(t)); }
+            if let Some(l) = &lang { sc += &format!("echo {} | sudo tee /etc/hyze-lang >/dev/null\n", ssh::sh_quote(l)); }
+            let o = ssh::exec_stdin(&m2, &sc)?;
+            if !o.status.success() { bail!("{}", String::from_utf8_lossy(&o.stderr).trim()); }
+            m.timezone = tz.clone(); m.lang = lang.clone(); m.save()?;
+            ui::ok(&format!("{name}: fuso {} · idioma {}", tz.as_deref().unwrap_or("—"), lang.as_deref().unwrap_or("—")));
+            ui::hint("reabra o Chromium da máquina para o idioma valer");
+        }
+        Cmd::CheckUpdate => { let _ = update::check(true); }
+        Cmd::Update { check } => {
+            ui::step("procurando atualização…");
+            match update::check(true)? {
+                None => ui::ok(&format!("você já está na versão mais recente (v{})", update::CURRENT)),
+                Some(rel) => {
+                    println!("{}  {} → {}", ui::bold("Nova versão"), ui::dim(&format!("v{}", update::CURRENT)), ui::green(&format!("v{}", rel.version)));
+                    for l in rel.notes.lines().filter(|l| !l.trim().is_empty()).take(4) { println!("  {}", ui::dim(l.trim())); }
+                    if check { ui::hint("instale com: hyzevm update"); return Ok(0); }
+                    ui::step("baixando e verificando…");
+                    let exe = update::install_cli(&rel)?;
+                    ui::ok(&format!("atualizado para v{} ({})", rel.version, exe.display()));
+                    ui::hint("o app (HyzeVM.app) se atualiza sozinho pelo aviso dentro dele");
+                }
+            }
         }
         Cmd::Doctor { json } => return Ok(doctor::run(json)),
         Cmd::Menubar { foreground, install, uninstall } => {

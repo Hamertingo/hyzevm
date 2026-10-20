@@ -87,7 +87,7 @@ browser (goto snapshot click type press scroll upload wait tabs)
 desktop (screenshot click move drag type press scroll open cursor)
 takeover (request wait done status) · view · share (create ls revoke)
 snapshot · volume · vault · port · always-on · timeout · auto-suspend
-up · service · menubar · skill · doctor · mcp · completions
+up · service · menubar · skill · locale · update · doctor · mcp · completions
 ```
 
 `hyzevm <command> --help` for details. `hyzevm completions zsh` for shell completion.
@@ -119,6 +119,14 @@ A small app (Tauri) over the same core: a live grid of machines, focus on one, a
 ```bash
 ./scripts/bundle-macos.sh     # builds HyzeVM.app
 ```
+
+## Updates
+
+`hyzevm update` checks the latest GitHub Release, verifies its SHA-256 and replaces the binary. The macOS app
+checks on its own (at most every 6 h): a small `v0.x.y` pill appears at the top — click it, **Update & restart**, done.
+
+Machines also inherit your computer's **timezone and language** (so the browser doesn't say `UTC / en-US` on a
+Brazilian IP); change it any time with `hyzevm locale <machine> [--tz …] [--lang …]`.
 
 ## 24/7
 

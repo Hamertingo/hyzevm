@@ -1,7 +1,7 @@
 // Sem janela de console no Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use hyzevm::{desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
+use hyzevm::{update, desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -224,6 +224,39 @@ async fn open_terminal(name: String) -> R<()> {
 }
 
 #[derive(Serialize)]
+struct Upd { version: String, current: String, notes: String, page: String, can_install: bool }
+
+/// Há versão nova? (consulta o GitHub no máx. a cada 6 h, ou sempre com `force`).
+#[tauri::command]
+async fn update_check(force: bool) -> R<Option<Upd>> {
+    blocking(move || Ok(update::check(force)?.map(|r| Upd {
+        can_install: update::app_asset_name().is_some_and(|n| r.assets.iter().any(|(a, _)| *a == n)) && update::running_bundle().is_some(),
+        version: r.version, current: update::CURRENT.to_string(), notes: r.notes, page: r.page,
+    }))).await
+}
+
+/// Baixa e verifica a versão nova, agenda a troca do .app e fecha para o script reabrir já atualizado.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> R<()> {
+    blocking(|| {
+        let rel = update::check(true)?.ok_or_else(|| anyhow::anyhow!("você já está na versão mais recente"))?;
+        let new_app = update::download_app(&rel)?;
+        update::swap_app_and_relaunch(&new_app, std::process::id())
+    }).await?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_url(url: String) -> R<()> {
+    if !url.starts_with("https://github.com/") { return Err("endereço não permitido".into()); }
+    blocking(move || {
+        let (bin, args): (&str, Vec<&str>) = match std::env::consts::OS { "macos" => ("open", vec![]), "windows" => ("cmd", vec!["/c", "start", ""]), _ => ("xdg-open", vec![]) };
+        std::process::Command::new(bin).args(args).arg(&url).spawn()?; Ok(())
+    }).await
+}
+
+#[derive(Serialize)]
 struct Check { name: String, ok: bool, detail: String }
 
 #[tauri::command]
@@ -246,7 +279,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, exec, takeover_done, set_always_on, open_terminal, doctor_report
+            platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, update_check, update_install, open_url, exec, takeover_done, set_always_on, open_terminal, doctor_report
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o app");

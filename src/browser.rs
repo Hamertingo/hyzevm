@@ -9,7 +9,9 @@ const CDP: &str = include_str!("cdp.py");
 fn ensure_browser(m: &Machine) -> Result<()> {
     let sc = "curl -sf http://127.0.0.1:9222/json/version >/dev/null && exit 0\n\
         export DISPLAY=:99\n\
+        L=$(cat /etc/hyze-lang 2>/dev/null || echo en-US)\n\
         setsid nohup chromium --user-data-dir=\"$HOME/.config/hyze-chromium\" --remote-debugging-port=9222 \
+        --lang=\"$L\" --accept-lang=\"$L,${L%%-*},en-US,en\" \
         --no-first-run --no-default-browser-check --start-maximized --password-store=basic about:blank \
         >/dev/null 2>&1 </dev/null &\n\
         for i in $(seq 1 40); do curl -sf http://127.0.0.1:9222/json/version >/dev/null && exit 0; sleep 0.5; done\n\

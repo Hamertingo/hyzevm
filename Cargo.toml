@@ -20,6 +20,7 @@ dirs = "5"
 base64 = "0.22"
 getrandom = "0.2"
 clap_complete = "4"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

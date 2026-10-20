@@ -24,6 +24,7 @@ const P = {
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
   keys: '<rect x="2.8" y="6" width="18.4" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/>',
   trash: '<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+  down: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
   cursor: '<path d="M6 4l12 7-5.3 1.4L10 18 6 4z"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>', refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.6M20 4v7h-7"/>',
 };
 const ic = (n, s = 16, w = 1.6) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -35,7 +36,7 @@ const IDLE = [[0, "Nunca"], [600, "10 min"], [1800, "30 min"], [3600, "1 hora"],
 
 /* ------------------------------------------------------------------ estado */
 const S = {
-  machines: [], sig: "", view: "grid", sel: null, control: false, info: false, k: null,
+  update: null, machines: [], sig: "", view: "grid", sel: null, control: false, info: false, k: null,
   thumbs: {}, stats: {}, cpu: {}, creating: null, screen: null, consoles: {}, busy: {},
 };
 const cur = () => S.machines.find((m) => m.name === S.sel);
@@ -59,12 +60,38 @@ function toast(html, { err = false, sticky = false } = {}) {
 }
 const call = async (cmd, args) => { try { return await invoke(cmd, args); } catch (e) { toast(esc(e), { err: true }); throw e; } };
 
+/* ================================================================== atualização */
+const updPill = () => (S.update ? `<button class="updpill" data-act="upd" title="Nova versão disponível">${ic("down", 13, 2)}v${esc(S.update.version)}</button>` : "");
+async function checkUpdate(force = false) {
+  try {
+    const u = await invoke("update_check", { force });
+    S.update = u; renderTop();
+    if (force) { if (u) openUpd(); else toast("Você já está na versão mais recente"); }
+  } catch (e) { if (force) toast(esc(e), { err: true }); }
+}
+function openUpd(state = "ask") {
+  const u = S.update; if (!u) return;
+  const notes = u.notes.split("\n").map((l) => l.replace(/^[-*#\s]+/, "").trim()).filter(Boolean).slice(0, 5).map((l) => `<li>${esc(l)}</li>`).join("");
+  $("#upd").innerHTML = `<div class="kscrim" data-updclose><div class="updbox">
+    <div class="uh"><span class="ui">${ic("down", 20, 1.8)}</span><div><b>Nova versão disponível</b><span>v${esc(u.current)} → <i>v${esc(u.version)}</i></span></div></div>
+    ${notes ? `<ul>${notes}</ul>` : ""}
+    ${state === "busy" ? `<div class="ubusy"><span class="spin"></span>Baixando e verificando…</div>`
+      : `<div class="uf"><button class="pill soft" data-act="updno">Depois</button>${u.can_install ? `<button class="pill solid" data-act="updgo">Atualizar e reiniciar</button>` : `<button class="pill solid" data-act="updpage">Abrir página de download</button>`}</div>`}
+  </div></div>`;
+}
+const closeUpd = () => ($("#upd").innerHTML = "");
+async function installUpd() {
+  openUpd("busy");
+  try { await invoke("update_install"); }                       // o app fecha e o novo abre sozinho
+  catch (e) { openUpd(); toast(esc(e), { err: true }); }
+}
+
 /* ================================================================== topo */
 function renderTop() {
   const top = $("#top");
   if (S.view !== "focus" || !cur()) {
     top.innerHTML = `<button class="find" data-act="k">${ic("search", 14, 1.8)}<span>Buscar ou executar…</span><span class="keys"><i>⌘</i><i>K</i></span></button>
-      <div class="grow" data-tauri-drag-region></div><button class="ib" title="Nova máquina  ⌘N" data-act="new">${ic("plus", 17)}</button>`;
+      <div class="grow" data-tauri-drag-region></div>${updPill()}<button class="ib" title="Nova máquina  ⌘N" data-act="new">${ic("plus", 17)}</button>`;
     return;
   }
   const m = cur(), desk = m.has_screen && m.state === "running";
@@ -75,7 +102,7 @@ function renderTop() {
     : `<button class="pill ${m.takeover ? "solid" : "soft"}" data-act="take" title="⌘↩">${ic("hand", 13)}Assumir</button>`;
   const pp = m.state === "running" ? `<button class="ib" title="Pausar" data-act="suspend">${ic("pause", 15, 1.9)}</button>` : `<button class="ib" title="Ligar" data-act="start">${ic("play", 14, 1.8)}</button>`;
   top.innerHTML = `<button class="back" data-act="home" title="Voltar  esc">${ic("back", 15, 1.8)}<b>${esc(m.name)}</b></button><span class="status">${status}</span>
-    <div class="grow" data-tauri-drag-region></div>${pill}${pp}<button class="ib" title="Informações  ⌘I" data-act="info">${ic("info", 16)}</button>`;
+    <div class="grow" data-tauri-drag-region></div>${updPill()}${pill}${pp}<button class="ib" title="Informações  ⌘I" data-act="info">${ic("info", 16)}</button>`;
 }
 
 /* ================================================================== grade */
@@ -272,6 +299,7 @@ function kItems() {
   }
   for (const x of S.machines.filter((x) => x.takeover && x !== m)) act("hand", `Assumir ${x.name}`, x.takeover, () => { openMachine(x.name); take(); });
   act("plus", "Nova máquina", "", () => openK("new"), "⌘N", { keep: true });
+  act("down", S.update ? `Atualizar para v${S.update.version}` : "Verificar atualizações", S.update ? "nova versão disponível" : "", () => (S.update ? openUpd() : checkUpdate(true)));
   if (S.view === "focus") act("back", "Voltar para a grade", "", () => goHome(), "esc");
   if (q) {
     for (const x of S.machines) {
@@ -422,6 +450,7 @@ listen("create-progress", (ev) => {
 
 /* ================================================================== eventos */
 document.addEventListener("click", async (e) => {
+  if (e.target.matches?.("[data-updclose]") && !$(".ubusy")) return closeUpd();
   if (S.k) return;
   const cp = e.target.closest("[data-copy]");
   if (cp) { try { await navigator.clipboard.writeText(cp.dataset.copy); toast("Copiado"); } catch { toast("Não foi possível copiar", { err: true }); } return; }
@@ -432,6 +461,10 @@ document.addEventListener("click", async (e) => {
     const m = cur();
     switch (a) {
       case "k": return openK();
+      case "upd": return openUpd();
+      case "updno": return closeUpd();
+      case "updgo": return installUpd();
+      case "updpage": closeUpd(); return call("open_url", { url: S.update?.page || "https://github.com/Hamertingo/hyzevm/releases" });
       case "new": return openK("new");
       case "home": return goHome();
       case "take": return take();
@@ -579,3 +612,5 @@ addEventListener("blur", closeCtx);
 
 refresh(true);
 setInterval(refresh, 2000);
+setTimeout(() => checkUpdate(false), 4000);          // sem atrasar a abertura
+setInterval(() => checkUpdate(false), 6 * 3600 * 1000);

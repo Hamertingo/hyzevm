@@ -13,5 +13,6 @@ pub mod store;
 pub mod takeover;
 pub mod template;
 pub mod ui;
+pub mod update;
 pub mod vault;
 pub mod watch;
