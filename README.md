@@ -7,6 +7,8 @@
 Spin up a clean Debian machine in ~10 seconds. Your agent runs code, browses the web,
 uploads files and posts content — you watch the screen and take over whenever it gets stuck.
 
+[![ci](https://github.com/Hamertingo/hyzevm/actions/workflows/ci.yml/badge.svg)](https://github.com/Hamertingo/hyzevm/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-black)
+
 [Install](#install) · [Quick start](#quick-start) · [For agents](#for-agents) · [App](#desktop-app) · [Português](README.pt-BR.md)
 
 <img src="docs/grid.jpg" width="760" alt="HyzeVM app: every machine live in a grid">
@@ -132,8 +134,8 @@ If QEMU dies it comes back on its own; the macOS service also keeps the Mac from
 | Host | Accelerator | Status |
 |---|---|---|
 | macOS (Apple Silicon) | HVF | ✅ built and tested |
-| Linux | KVM | ⚠️ implemented, untested |
-| Windows | WHPX | ⚠️ implemented, untested |
+| Linux | KVM | ⚠️ compiles in CI, not run end-to-end yet |
+| Windows | WHPX | ⚠️ compiles in CI, not run end-to-end yet |
 
 Guests are Linux only (Debian 12, arm64 on Apple Silicon, amd64 elsewhere).
 
