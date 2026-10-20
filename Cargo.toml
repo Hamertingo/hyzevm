@@ -1,6 +1,6 @@
 [package]
 name = "hyzevm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Linux computer of its own for every AI agent — CLI, MCP and desktop app"
 license = "MIT"
