@@ -1,0 +1,134 @@
+//! Biblioteca de máquinas: ~/.hyzevm/machines/<nome>/ (ou $HYZEVM_HOME).
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Machine {
+    pub name: String,
+    pub template: String,
+    pub cpus: u32,
+    pub memory_mb: u32,
+    pub disk_gb: u32,
+    pub ssh_port: u16,
+    pub qmp_port: u16,
+    /// (host, guest) — portas publicadas via redirecionamento.
+    pub ports: Vec<(u16, u16)>,
+    pub user: String,
+    /// Porta local → noVNC (6080) do guest; 0 = máquina antiga sem visualização.
+    #[serde(default)]
+    pub view_port: u16,
+    /// Porta local → noVNC somente-leitura (6081); x11vnc -viewonly garante no servidor.
+    #[serde(default)]
+    pub view_ro_port: u16,
+    /// Pausa após esse tempo ocioso (0 = nunca). Padrão 30 min, como o InstaBox.
+    #[serde(default = "default_auto_suspend")]
+    pub auto_suspend_secs: u64,
+    /// Instante (unix) em que `on_timeout` age; None = sem prazo.
+    #[serde(default)]
+    pub expires_at: Option<u64>,
+    #[serde(default = "default_on_timeout")]
+    pub on_timeout: String,
+    #[serde(default)]
+    pub meta: BTreeMap<String, String>,
+    #[serde(default)]
+    pub volumes: Vec<String>,
+    /// 24/7: sobe sozinha com o host (`hyzevm up`), reinicia se cair e nunca auto-suspende.
+    #[serde(default)]
+    pub always_on: bool,
+    /// Escreve o vault nesta máquina no boot.
+    #[serde(default = "yes")]
+    pub vault: bool,
+}
+
+fn default_auto_suspend() -> u64 { 1800 }
+fn default_on_timeout() -> String { "pause".into() }
+fn yes() -> bool { true }
+
+pub fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+
+/// "30m", "2h", "45s", "1d", "90" (segundos) ou "0".
+pub fn parse_dur(s: &str) -> Result<u64> {
+    let s = s.trim();
+    let (num, mult) = match s.chars().last() {
+        Some('s') => (&s[..s.len() - 1], 1), Some('m') => (&s[..s.len() - 1], 60),
+        Some('h') => (&s[..s.len() - 1], 3600), Some('d') => (&s[..s.len() - 1], 86400),
+        _ => (s, 1),
+    };
+    Ok(num.parse::<u64>().with_context(|| format!("duração inválida “{s}” (ex.: 30m, 2h, 0)"))? * mult)
+}
+
+pub fn home() -> PathBuf {
+    std::env::var_os("HYZEVM_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs::home_dir().expect("sem home").join(".hyzevm"))
+}
+
+pub fn machines_dir() -> PathBuf { home().join("machines") }
+pub fn images_dir() -> PathBuf { home().join("images") }
+pub fn snapshots_dir() -> PathBuf { home().join("snapshots") }
+pub fn volumes_dir() -> PathBuf { home().join("volumes") }
+pub fn vault_file() -> PathBuf { home().join("vault.json") }
+pub fn shares_file() -> PathBuf { home().join("shares.json") }
+pub fn gateway_file() -> PathBuf { home().join("gateway.port") }
+
+impl Machine {
+    pub fn dir(&self) -> PathBuf { machines_dir().join(&self.name) }
+    pub fn disk(&self) -> PathBuf { self.dir().join("disk.qcow2") }
+    pub fn key(&self) -> PathBuf { self.dir().join("id_ed25519") }
+    pub fn seed_dir(&self) -> PathBuf { self.dir().join("seed") }
+    pub fn activity_file(&self) -> PathBuf { self.dir().join("activity") }
+    pub fn intent_file(&self) -> PathBuf { self.dir().join("intent") }
+    /// O que o usuário quer: "up" ou "down" (distingue queda de desligamento de propósito).
+    pub fn set_intent(&self, up: bool) { let _ = std::fs::write(self.intent_file(), if up { "up" } else { "down" }); }
+    pub fn wants_up(&self) -> bool { std::fs::read_to_string(self.intent_file()).map(|s| s.trim() == "up").unwrap_or(false) }
+    pub fn watch_file(&self) -> PathBuf { self.dir().join("watch.alive") }
+    /// Marca atividade (adia o auto-suspend).
+    pub fn touch(&self) { let _ = std::fs::write(self.activity_file(), now().to_string()); }
+    pub fn idle_secs(&self) -> u64 {
+        let last = std::fs::read_to_string(self.activity_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        now().saturating_sub(last)
+    }
+    pub fn serial_log(&self) -> PathBuf { self.dir().join("serial.log") }
+
+    pub fn save(&self) -> Result<()> {
+        std::fs::create_dir_all(self.dir())?;
+        let tmp = self.dir().join("machine.json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(tmp, self.dir().join("machine.json"))?; // atômico
+        Ok(())
+    }
+
+    pub fn load(name: &str) -> Result<Self> {
+        let p = machines_dir().join(name).join("machine.json");
+        let Ok(b) = std::fs::read(&p) else { bail!("máquina “{name}” não existe") };
+        Ok(serde_json::from_slice(&b)?)
+    }
+
+    pub fn remove(&self) -> Result<()> { Ok(std::fs::remove_dir_all(self.dir())?) }
+}
+
+pub fn list() -> Result<Vec<Machine>> {
+    let mut v = vec![];
+    if let Ok(rd) = std::fs::read_dir(machines_dir()) {
+        for e in rd.flatten() {
+            if let Ok(m) = Machine::load(&e.file_name().to_string_lossy()) { v.push(m); }
+        }
+    }
+    v.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(v)
+}
+
+pub fn valid_name(n: &str) -> Result<()> {
+    if n.is_empty() || !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        bail!("nome inválido “{n}” (use letras, números, - e _)");
+    }
+    Ok(())
+}
+
+/// Porta TCP livre no loopback.
+pub fn free_port() -> Result<u16> {
+    Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+}

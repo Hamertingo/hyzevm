@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyzeVM — Variações de design</title>
+<style>
+/* ============================================================ base da página */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI Variable Display", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font: 13px/1.45 var(--font); -webkit-font-smoothing: antialiased; background: #0e0e10; color: #f5f5f7; overflow: hidden; }
+button, input, select { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: pointer; }
+svg { display: block; flex: none; }
+.num { font-variant-numeric: tabular-nums; }
+
+.page { height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); }
+.pagebar { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 20px; padding: 14px 22px; border-bottom: 1px solid rgba(255,255,255,.07); background: #121214; }
+.pagebar .brand { font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.pagebar .brand span { color: #8e8e93; font-weight: 500; }
+.picker { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(255,255,255,.06); }
+.picker button { padding: 6px 14px; border-radius: 8px; color: #a1a1a6; font-weight: 550; white-space: nowrap; }
+.picker button b { color: #636366; font-weight: 700; margin-right: 6px; }
+.picker button.on { background: #2c2c2e; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.picker button.on b { color: #0a84ff; }
+.pagebar .note { flex: 1; min-width: 0; color: #8e8e93; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.themebtn { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; background: rgba(255,255,255,.06); color: #d1d1d6; font-weight: 550; white-space: nowrap; }
+.stagewrap { position: relative; overflow: hidden; display: grid; place-items: center; background: radial-gradient(1200px 600px at 50% 0%, #1b1b20, #0e0e10); }
+.scaler { position: absolute; left: 50%; top: 50%; width: 1280px; height: 800px; transform-origin: center center; transform: translate(-50%, -50%); }
+
+/* ============================================================ janela (mock macOS) */
+.win { position: relative; width: 1280px; height: 800px; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08) inset, 0 30px 90px rgba(0,0,0,.55); font-size: 13px; }
+.lights { position: absolute; top: 18px; left: 18px; display: flex; gap: 8px; z-index: 30; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.2); }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+
+/* tokens por tema (todas as variações usam) */
+.win.light { --bg: #ffffff; --bg2: #f5f5f7; --bg3: #ebebef; --side: #f3f3f6; --text: #1d1d1f; --text2: #6e6e73; --text3: #a1a1a6; --line: rgba(0,0,0,.08); --fill: rgba(0,0,0,.045); --fill2: rgba(0,0,0,.08); --accent: #007aff; --accentSoft: rgba(0,122,255,.11); --card: #ffffff; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.07); color: var(--text); background: var(--bg); }
+.win.dark { --bg: #1c1c1e; --bg2: #232325; --bg3: #2c2c2e; --side: #202022; --text: #f5f5f7; --text2: #a1a1a6; --text3: #6e6e73; --line: rgba(255,255,255,.08); --fill: rgba(255,255,255,.055); --fill2: rgba(255,255,255,.1); --accent: #0a84ff; --accentSoft: rgba(10,132,255,.2); --card: #232325; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45); color: var(--text); background: var(--bg); }
+.win { --green: #30d158; --orange: #ff9f0a; --red: #ff453a; --purple: #bf5af2; }
+
+/* componentes compartilhados */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); flex: none; display: inline-block; }
+.dot.running { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.dot.paused { background: var(--orange); }
+.dot.alert { background: var(--orange); animation: pulse 1.6s infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--orange) 55%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px; border-radius: 8px; font-weight: 550; background: var(--card); border: 1px solid var(--line); box-shadow: 0 1px 1px rgba(0,0,0,.04); white-space: nowrap; }
+.win.dark .btn { background: var(--bg3); border-color: transparent; box-shadow: none; }
+.btn:hover { filter: brightness(.97); }
+.win.dark .btn:hover { filter: brightness(1.15); }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.sm { height: 26px; padding: 0 10px; font-size: 12.5px; }
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text2); }
+.btn.ghost:hover { background: var(--fill); filter: none; }
+.ibtn { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; color: var(--text2); }
+.ibtn:hover { background: var(--fill); color: var(--text); }
+.kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; font: 600 10.5px var(--font); color: var(--text2); background: var(--fill); border: 1px solid var(--line); }
+.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--fill2); }
+.seg button { height: 26px; padding: 0 15px; border-radius: 7px; font-weight: 550; color: var(--text2); }
+.seg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.win.dark .seg button.on { background: #5a5a5e; color: #fff; }
+.tag { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--fill); color: var(--text2); white-space: nowrap; }
+.tag.green { background: color-mix(in srgb, var(--green) 16%, transparent); color: color-mix(in srgb, var(--green) 80%, var(--text)); }
+.tag.orange { background: color-mix(in srgb, var(--orange) 18%, transparent); color: color-mix(in srgb, var(--orange) 85%, var(--text)); }
+.tag.blue { background: var(--accentSoft); color: var(--accent); }
+.switch { width: 38px; height: 22px; border-radius: 11px; background: var(--fill2); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .18s; }
+.switch.on { background: var(--green); } .switch.on::after { transform: translateX(16px); }
+.bar { height: 5px; border-radius: 3px; background: var(--fill2); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.bar i.warn { background: var(--orange); }
+
+/* ============================================================ desktop falso (a tela da VM) */
+.screenbox { position: relative; overflow: hidden; background: #000; container-type: inline-size; }
+.vmd { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; transform-origin: 0 0; transform: scale(calc(100cqw / 1280px)); font-family: "Inter", system-ui, sans-serif; color: #1f1f1f; }
+@supports not (transform: scale(calc(100cqw / 1280px))) { .vmd { transform: scale(var(--s, .5)); } }
+.vmd .wall { position: absolute; inset: 0; background: linear-gradient(#16213e, #533a7b); }
+.vmd .dock { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 16px; padding: 12px 16px; border-radius: 22px; background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.35); }
+.vmd .dock i { width: 52px; height: 52px; border-radius: 13px; display: block; }
+.vmd .dock .chr { border-radius: 50%; background: conic-gradient(from -30deg, #ea4335 0 33%, #34a853 0 66%, #fbbc05 0); position: relative; }
+.vmd .dock .chr::after { content: ""; position: absolute; inset: 15px; border-radius: 50%; background: #4285f4; border: 4px solid #fff; }
+.vmd .dock .trm { background: #26262a; border: 2px solid #8a8a8e; }
+.vmd .dock .fls { background: linear-gradient(#e9e9ec, #c7c7cc); }
+.vmd .chrome { position: absolute; left: 0; top: 0; right: 0; bottom: 96px; background: #fff; display: flex; flex-direction: column; }
+.vmd .tabsbar { height: 40px; background: #dfe7f6; display: flex; align-items: flex-end; padding: 0 10px; gap: 4px; }
+.vmd .ctab { height: 32px; padding: 0 14px; border-radius: 10px 10px 0 0; background: #fff; display: flex; align-items: center; gap: 9px; font-size: 13px; width: 240px; }
+.vmd .ctab.off { background: transparent; color: #555; }
+.vmd .fav { width: 16px; height: 16px; border-radius: 4px; background: #ff0033; }
+.vmd .omni { height: 46px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #e3e3e3; }
+.vmd .omni .u { flex: 1; height: 32px; border-radius: 16px; background: #eef1f7; display: flex; align-items: center; padding: 0 16px; font-size: 14px; color: #333; }
+.vmd .pg { flex: 1; position: relative; background: #f9f9f9; overflow: hidden; }
+.vmd .ytbar { height: 56px; background: #fff; border-bottom: 1px solid #e5e5e5; display: flex; align-items: center; padding: 0 22px; gap: 12px; font-weight: 600; font-size: 18px; }
+.vmd .ytbar .logo { width: 30px; height: 21px; border-radius: 6px; background: #ff0033; position: relative; }
+.vmd .ytbar .logo::after { content: ""; position: absolute; left: 12px; top: 6px; border: 5px solid transparent; border-left: 8px solid #fff; }
+.vmd .modal { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); width: 860px; height: 470px; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+.vmd .modal h3 { font-size: 20px; padding: 20px 26px; border-bottom: 1px solid #e5e5e5; font-weight: 600; }
+.vmd .mbody { flex: 1; display: grid; grid-template-columns: 1fr 300px; gap: 26px; padding: 22px 26px; }
+.vmd .fld { border: 1px solid #ccc; border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; font-size: 14px; }
+.vmd .fld small { display: block; color: #666; font-size: 12px; margin-bottom: 3px; }
+.vmd .fld.big { height: 120px; }
+.vmd .thumb { height: 170px; border-radius: 8px; background: linear-gradient(135deg, #2b2d42, #8d99ae); }
+.vmd .mfoot { height: 64px; border-top: 1px solid #e5e5e5; display: flex; align-items: center; gap: 14px; padding: 0 26px; font-size: 13px; color: #555; }
+.vmd .prog { flex: 1; height: 6px; background: #e5e5e5; border-radius: 3px; overflow: hidden; }
+.vmd .prog i { display: block; width: 64%; height: 100%; background: #065fd4; }
+.vmd .next { background: #065fd4; color: #fff; padding: 9px 18px; border-radius: 18px; font-weight: 600; }
+.vmd .agentcur { position: absolute; z-index: 5; pointer-events: none; }
+.vmd .agentcur svg { filter: drop-shadow(0 2px 4px rgba(0,0,0,.35)); }
+.vmd .agentcur span { position: absolute; left: 20px; top: 20px; white-space: nowrap; padding: 4px 10px; border-radius: 10px; background: #bf5af2; color: #fff; font: 600 13px system-ui; }
+.vmd .ripple { position: absolute; width: 46px; height: 46px; border-radius: 50%; border: 3px solid #bf5af2; transform: translate(-50%, -50%); animation: rip 1.8s ease-out infinite; }
+@keyframes rip { from { opacity: .9; width: 14px; height: 14px; } to { opacity: 0; width: 70px; height: 70px; } }
+.vmd .serp { padding: 28px 60px; }
+.vmd .serp .q { width: 620px; height: 44px; border-radius: 22px; border: 1px solid #dfe1e5; box-shadow: 0 1px 6px rgba(32,33,36,.2); display: flex; align-items: center; padding: 0 20px; font-size: 16px; margin-bottom: 26px; }
+.vmd .serp .r { width: 640px; margin-bottom: 22px; }
+.vmd .serp .r small { color: #4d5156; font-size: 13px; }
+.vmd .serp .r b { display: block; color: #1a0dab; font-size: 19px; font-weight: 500; margin: 3px 0; }
+.vmd .serp .r p { color: #4d5156; font-size: 14px; line-height: 1.5; }
+.vmd.term { background: #0d0f12; color: #c9d1d9; font: 17px/1.6 ui-monospace, Menlo, monospace; padding: 26px 32px; }
+.vmd.term .p { color: #7ee787; } .vmd.term .d { color: #6e7681; }
+.vmd.paused { filter: grayscale(1) brightness(.55); }
+
+/* ============================================================ A · Clássico macOS */
+.va { display: grid; grid-template-columns: 250px 1fr; height: 100%; }
+.va .side { background: var(--side); border-right: 1px solid var(--line); padding: 52px 10px 12px; display: flex; flex-direction: column; }
+.win.light .va .side { background: rgba(236,236,241,.92); }
+.va .sh { font-size: 11px; font-weight: 650; color: var(--text3); letter-spacing: .03em; text-transform: uppercase; padding: 10px 10px 6px; }
+.va .it { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 9px; border-radius: 9px; width: 100%; text-align: left; }
+.va .it:hover { background: var(--fill); }
+.va .it.sel { background: var(--accentSoft); }
+.va .tile { position: relative; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--fill2); color: var(--text2); flex: none; }
+.va .it.sel .tile { background: var(--accent); color: #fff; }
+.va .tile .dot { position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; box-shadow: 0 0 0 2px var(--side); }
+.va .nm { font-weight: 600; } .va .ss { font-size: 11.5px; color: var(--text2); }
+.va .main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.va .tool { height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
+.va .tool h1 { font: 650 15px var(--display); }
+.va .tool .grow { flex: 1; }
+.va .body { flex: 1; min-height: 0; padding: 18px 22px 20px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
+.va .notice { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; border-radius: 11px; background: color-mix(in srgb, var(--orange) 12%, var(--bg)); border: 1px solid color-mix(in srgb, var(--orange) 34%, transparent); }
+.va .notice .g { flex: 1; } .va .notice b { font-weight: 650; } .va .notice small { display: block; color: var(--text2); }
+.va .scr { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 260px; gap: 16px; }
+.va .frame { border-radius: 12px; overflow: hidden; box-shadow: var(--shadow), 0 0 0 1px var(--line); align-self: start; aspect-ratio: 16/10; }
+.va .rail { display: flex; flex-direction: column; gap: 12px; }
+.va .box { border-radius: 12px; background: var(--bg2); border: 1px solid var(--line); padding: 14px; }
+.va .box h4 { font-size: 11.5px; font-weight: 650; color: var(--text2); margin-bottom: 10px; }
+.va .kv { display: flex; justify-content: space-between; padding: 5px 0; } .va .kv span:last-child { color: var(--text2); }
+.va .mrow { display: grid; grid-template-columns: 70px 1fr 38px; align-items: center; gap: 10px; padding: 5px 0; }
+.va .mrow span:last-child { text-align: right; color: var(--text2); }
+.va .dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.va .card { border-radius: 12px; background: var(--bg2); border: 1px solid var(--line); overflow: hidden; }
+.va .card h4 { padding: 12px 14px; font-weight: 650; }
+.va .row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-top: 1px solid var(--line); }
+.va .row .v { color: var(--text2); }
+.va .cons { flex: 1; border-radius: 12px; background: #0d0f12; color: #c9d1d9; font: 12.5px/1.65 var(--mono); padding: 14px 16px; }
+
+/* ============================================================ B · Comando (denso, teclado) */
+.vb { display: grid; grid-template-columns: 56px 300px 1fr; height: 100%; font-size: 12.5px; }
+.vb .rail { background: var(--side); border-right: 1px solid var(--line); padding: 52px 0 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.vb .rail .ibtn.on { background: var(--fill2); color: var(--text); }
+.vb .rail .sp { flex: 1; }
+.vb .list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.vb .lh { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
+.vb .lh b { font-weight: 650; font-size: 13px; }
+.vb .search { margin: 10px 12px 6px; height: 30px; border-radius: 8px; background: var(--fill); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--text3); }
+.vb .search span { flex: 1; }
+.vb .grp { padding: 10px 16px 4px; font-size: 11px; font-weight: 650; color: var(--text3); }
+.vb .li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 9px 12px 9px 16px; margin: 0 6px; border-radius: 8px; text-align: left; }
+.vb .li:hover { background: var(--fill); }
+.vb .li.sel { background: var(--fill2); }
+.vb .li .n { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.vb .li .s { grid-column: 1; color: var(--text3); font-size: 11.5px; padding-left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb .li svg.spark { grid-row: 1 / span 2; align-self: center; }
+.vb .detail { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.vb .dh { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
+.vb .dh h2 { font: 650 14px var(--display); }
+.vb .dh .grow { flex: 1; }
+.vb .tabs { display: flex; gap: 18px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.vb .tabs button { padding: 10px 0; color: var(--text3); font-weight: 600; position: relative; }
+.vb .tabs button.on { color: var(--text); }
+.vb .tabs button.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--text); border-radius: 2px; }
+.vb .split { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 270px; }
+.vb .stage { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid var(--line); min-width: 0; }
+.vb .frame { border-radius: 8px; overflow: hidden; aspect-ratio: 16/10; box-shadow: 0 0 0 1px var(--line); }
+.vb .alert { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--orange) 40%, transparent); background: color-mix(in srgb, var(--orange) 9%, transparent); }
+.vb .alert .g { flex: 1; color: var(--text2); } .vb .alert b { color: var(--text); }
+.vb .insp { padding: 14px 16px; overflow: auto; }
+.vb .insp h5 { font-size: 11px; font-weight: 650; color: var(--text3); margin: 14px 0 6px; }
+.vb .insp h5:first-child { margin-top: 0; }
+.vb .prop { display: grid; grid-template-columns: 96px 1fr; gap: 8px; padding: 4px 0; }
+.vb .prop span:first-child { color: var(--text3); }
+.vb .prop .m { font-family: var(--mono); font-size: 11.5px; }
+.vb .feed { position: relative; padding-left: 14px; }
+.vb .feed::before { content: ""; position: absolute; left: 3px; top: 6px; bottom: 6px; width: 1px; background: var(--line); }
+.vb .ev { position: relative; padding: 4px 0 8px; }
+.vb .ev::before { content: ""; position: absolute; left: -14px; top: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--text3); box-shadow: 0 0 0 3px var(--bg); }
+.vb .ev.k-takeover::before { background: var(--orange); } .vb .ev.k-browser::before { background: var(--accent); } .vb .ev.k-upload::before { background: var(--purple); } .vb .ev.k-exec::before { background: var(--green); }
+.vb .ev small { display: block; color: var(--text3); font-size: 11px; }
+.vb .statusbar { grid-column: 1 / -1; }
+.vb-wrap { display: grid; grid-template-rows: 1fr 26px; height: 100%; }
+.vb-sb { display: flex; align-items: center; gap: 18px; padding: 0 14px; border-top: 1px solid var(--line); background: var(--side); color: var(--text3); font-size: 11.5px; }
+.vb-sb .grow { flex: 1; }
+.palette { position: absolute; inset: 0; z-index: 40; display: grid; justify-items: center; padding-top: 120px; background: rgba(0,0,0,.25); }
+.palette .pbox { width: 600px; height: max-content; border-radius: 14px; background: var(--card); box-shadow: 0 30px 90px rgba(0,0,0,.45), 0 0 0 1px var(--line); overflow: hidden; }
+.win.dark .palette .pbox { background: #262628; }
+.palette .pin { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.palette .pin span { flex: 1; color: var(--text); } .palette .pin span i { color: var(--text3); font-style: normal; }
+.palette .pg { padding: 8px; }
+.palette .pg small { display: block; padding: 6px 10px 4px; color: var(--text3); font-size: 11px; font-weight: 650; }
+.palette .po { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 8px; }
+.palette .po.on { background: var(--accent); color: #fff; }
+.palette .po.on .kbd { background: rgba(255,255,255,.2); color: #fff; border-color: transparent; }
+.palette .po span { flex: 1; }
+
+/* ============================================================ C · Palco (a tela em primeiro lugar) */
+.vc { position: relative; height: 100%; background: #08080a; overflow: hidden; }
+.vc .amb { position: absolute; inset: -80px; background: linear-gradient(#16213e, #533a7b); filter: blur(70px) saturate(1.2); opacity: .55; }
+.vc .stage { position: absolute; left: 50%; top: 74px; transform: translateX(-50%); width: 1000px; aspect-ratio: 16/10; border-radius: 14px; overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 40px 120px rgba(0,0,0,.7); }
+.glass { background: rgba(30,30,34,.62); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border: 1px solid rgba(255,255,255,.12); color: #f5f5f7; }
+.win.light .glass { background: rgba(250,250,252,.72); color: #1d1d1f; border-color: rgba(0,0,0,.08); }
+.vc .top { position: absolute; top: 12px; left: 96px; right: 16px; height: 46px; display: flex; align-items: center; gap: 10px; z-index: 10; }
+.vc .pill { height: 38px; border-radius: 19px; display: inline-flex; align-items: center; gap: 9px; padding: 0 14px; font-weight: 600; }
+.vc .pill .chev { opacity: .5; }
+.vc .ticker { flex: 1; display: flex; justify-content: center; }
+.vc .ticker .pill { font-weight: 500; gap: 10px; }
+.vc .ticker .ag { display: inline-flex; align-items: center; gap: 6px; color: #d29bff; font-weight: 650; }
+.win.light .vc .ticker .ag { color: #9b3fd6; }
+.vc .tools { display: flex; gap: 6px; }
+.vc .round { width: 38px; height: 38px; border-radius: 19px; display: grid; place-items: center; }
+.vc .take { height: 38px; border-radius: 19px; padding: 0 16px; font-weight: 650; background: #fff; color: #111; display: inline-flex; align-items: center; gap: 8px; }
+.vc .ask { position: absolute; left: 50%; top: 66px; transform: translateX(-50%); z-index: 12; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 16px; background: rgba(255,159,10,.95); color: #1d1300; font-weight: 600; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+.vc .ask .btn { height: 28px; background: #1d1300; color: #fff; border: 0; }
+.vc .ask .btn.ghost { background: rgba(0,0,0,.12); color: #1d1300; }
+.vc .strip { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 10px; padding: 10px; border-radius: 20px; z-index: 10; }
+.vc .th { width: 150px; border-radius: 11px; overflow: hidden; text-align: left; position: relative; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .15s, transform .15s; }
+.vc .th:hover { transform: translateY(-2px); }
+.vc .th.sel { outline-color: #0a84ff; }
+.vc .th .screenbox { height: 94px; }
+.vc .th .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 9px 6px; background: linear-gradient(transparent, rgba(0,0,0,.75)); color: #fff; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.vc .th.new { display: grid; place-items: center; background: rgba(255,255,255,.08); color: #d1d1d6; height: 94px; border: 1px dashed rgba(255,255,255,.25); }
+.win.light .vc .th.new { color: #333; border-color: rgba(0,0,0,.2); background: rgba(0,0,0,.04); }
+.vc .insp { position: absolute; top: 66px; right: 16px; bottom: 136px; width: 300px; border-radius: 18px; z-index: 11; padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow: auto; transition: transform .25s cubic-bezier(.2,.8,.2,1), opacity .2s; }
+.vc .insp.off { transform: translateX(330px); opacity: 0; pointer-events: none; }
+.vc .insp h3 { font: 700 18px var(--display); }
+.vc .insp .sub { opacity: .65; margin-top: -10px; }
+.vc .rings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.vc .rings small { display: block; opacity: .65; font-size: 11px; margin-top: 4px; }
+.vc .ln { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.1); }
+.win.light .vc .ln { border-color: rgba(0,0,0,.08); }
+.vc .ln span:last-child { opacity: .7; }
+
+/* ============================================================ D · Painel (startup) */
+.vd { display: flex; flex-direction: column; height: 100%; background: var(--bg2); }
+.win.dark .vd { background: #161618; }
+.vd .nav { height: 56px; display: flex; align-items: center; gap: 22px; padding: 0 22px 0 96px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.vd .logo { display: flex; align-items: center; gap: 9px; font: 700 15px var(--display); letter-spacing: -.01em; }
+.vd .logo i { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, #0a84ff, #5e5ce6); display: block; }
+.vd .navl { display: flex; gap: 4px; }
+.vd .navl button { height: 30px; padding: 0 12px; border-radius: 8px; color: var(--text2); font-weight: 550; }
+.vd .navl button.on { color: var(--text); background: var(--fill); }
+.vd .navl .cnt { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: var(--orange); color: #fff; font-size: 10.5px; font-weight: 700; }
+.vd .nav .grow { flex: 1; }
+.vd .srch { width: 240px; height: 32px; border-radius: 8px; background: var(--fill); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--text3); }
+.vd .srch span { flex: 1; }
+.vd .ava { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #ff9f0a, #ff375f); }
+.vd .content { flex: 1; min-height: 0; overflow: auto; padding: 26px 32px; }
+.vd .ph { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+.vd .ph h1 { font: 700 26px var(--display); letter-spacing: -.02em; }
+.vd .ph p { color: var(--text2); margin-top: 2px; }
+.vd .chips { display: flex; gap: 6px; margin-bottom: 18px; }
+.vd .chip { height: 30px; padding: 0 13px; border-radius: 15px; border: 1px solid var(--line); background: var(--bg); color: var(--text2); font-weight: 550; display: inline-flex; align-items: center; gap: 6px; }
+.vd .chip.on { background: var(--text); color: var(--bg); border-color: transparent; }
+.vd .callout { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: var(--bg); border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--orange) 10%, transparent); margin-bottom: 18px; }
+.vd .callout .ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.vd .callout .g { flex: 1; } .vd .callout b { font-weight: 650; } .vd .callout small { display: block; color: var(--text2); }
+.vd .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.vd .mc { border-radius: 16px; background: var(--bg); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden; text-align: left; transition: transform .15s, box-shadow .15s; }
+.vd .mc:hover { transform: translateY(-2px); }
+.vd .mc .screenbox { aspect-ratio: 16/9.5; }
+.vd .mc .mb { padding: 13px 15px 15px; }
+.vd .mc .t { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vd .mc .t b { font-weight: 650; font-size: 14px; }
+.vd .mc .task { color: var(--text2); margin: 2px 0 12px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd .mc .ms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 11px; color: var(--text3); }
+.vd .mc .ms .bar { margin-top: 5px; }
+.vd .mc.add { display: grid; place-items: center; text-align: center; color: var(--text2); border-style: dashed; box-shadow: none; background: transparent; min-height: 260px; }
+.vd .mc.add .ic { width: 44px; height: 44px; border-radius: 13px; margin: 0 auto 10px; display: grid; place-items: center; background: var(--accentSoft); color: var(--accent); }
+.vd .crumbs { display: flex; align-items: center; gap: 8px; color: var(--text2); margin-bottom: 14px; font-weight: 550; }
+.vd .crumbs button { color: var(--text2); } .vd .crumbs b { color: var(--text); font-weight: 650; }
+.vd .mh { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.vd .mh h1 { font: 700 24px var(--display); letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+.vd .mh .acts { display: flex; gap: 8px; }
+.vd .two { display: grid; grid-template-columns: 1fr 330px; gap: 16px; }
+.vd .panel { border-radius: 16px; background: var(--bg); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden; }
+.vd .panel .ptop { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
+.vd .panel .ptop b { font-weight: 650; }
+.vd .panel .screenbox { aspect-ratio: 16/10; }
+.vd .tl { padding: 6px 16px 12px; }
+.vd .tli { display: grid; grid-template-columns: 26px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.vd .tli:last-child { border-bottom: 0; }
+.vd .tli .k { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--fill); color: var(--text2); }
+.vd .tli.k-takeover .k { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.vd .tli.k-browser .k { background: var(--accentSoft); color: var(--accent); }
+.vd .tli.k-upload .k { background: color-mix(in srgb, var(--purple) 16%, transparent); color: var(--purple); }
+.vd .tli.k-exec .k { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.vd .tli p { line-height: 1.4; } .vd .tli small { color: var(--text3); font-size: 11.5px; }
+.vd .tli code { font: 11.5px var(--mono); color: var(--text2); }
+.vd .tli .cta { display: flex; gap: 6px; margin-top: 8px; }
+.vd .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 16px; }
+.vd .st { border-radius: 14px; background: var(--bg); border: 1px solid var(--line); padding: 14px 16px; }
+.vd .st small { color: var(--text2); font-weight: 550; }
+.vd .st .big { font: 700 24px var(--display); letter-spacing: -.02em; margin: 2px 0 8px; }
+.vd .st .big span { font-size: 13px; color: var(--text3); font-weight: 600; margin-left: 3px; }
+
+/* modal nova máquina (D) */
+.modal { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.32); backdrop-filter: blur(4px); }
+.modal .mbox { width: 620px; border-radius: 20px; background: var(--bg); box-shadow: 0 40px 120px rgba(0,0,0,.45), 0 0 0 1px var(--line); padding: 26px 28px 22px; }
+.win.dark .modal .mbox { background: #232326; }
+.modal h2 { font: 700 21px var(--display); letter-spacing: -.015em; }
+.modal .lead { color: var(--text2); margin: 4px 0 20px; }
+.modal label { display: block; font-size: 12px; font-weight: 650; color: var(--text2); margin-bottom: 7px; }
+.modal .inp { width: 100%; height: 36px; border-radius: 9px; border: 1px solid var(--line); padding: 0 12px; background: var(--bg); margin-bottom: 18px; box-shadow: 0 0 0 3px var(--accentSoft); border-color: var(--accent); }
+.win.dark .modal .inp { background: var(--bg2); }
+.modal .tps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.modal .tp { border-radius: 14px; border: 1px solid var(--line); text-align: left; overflow: hidden; }
+.modal .tp.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+.modal .tp .art { height: 74px; display: grid; place-items: center; background: var(--bg2); color: var(--text2); }
+.modal .tp.on .art { background: var(--accentSoft); color: var(--accent); }
+.modal .tp .tx { padding: 10px 12px 12px; } .modal .tp b { font-weight: 650; } .modal .tp span { display: block; color: var(--text2); font-size: 11.5px; margin-top: 2px; }
+.modal .sizes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.modal .sz { border-radius: 11px; border: 1px solid var(--line); padding: 10px 12px; text-align: left; }
+.modal .sz.on { border-color: var(--accent); background: var(--accentSoft); }
+.modal .sz b { display: block; font-weight: 650; } .modal .sz span { color: var(--text2); font-size: 11.5px; }
+.modal .opt { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--line); }
+.modal .opt small { display: block; color: var(--text2); }
+.modal .mf { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.modal .mf .grow { flex: 1; color: var(--text3); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pagebar">
+    <div class="brand">HyzeVM <span>· variações de design</span></div>
+    <div class="picker" id="picker">
+      <button data-v="a"><b>A</b>Clássico</button>
+      <button data-v="b"><b>B</b>Comando</button>
+      <button data-v="c"><b>C</b>Palco</button>
+      <button data-v="d"><b>D</b>Painel</button>
+    </div>
+    <div class="note" id="note"></div>
+    <button class="themebtn" id="theme"></button>
+  </header>
+  <div class="stagewrap" id="wrap"><div class="scaler" id="scaler"></div></div>
+</div>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------- dados de exemplo */
+const MACHINES = [
+  { id: "agente-videos", tpl: "desktop", state: "running", always: true, cpu: 38, mem: 41, disk: 15, memTxt: "1,6 de 3,8 GB", diskTxt: "4,6 de 31 GB", up: "3 h 12 min", task: "Publicando um vídeo no YouTube", takeover: "CAPTCHA no login do Instagram", screen: "yt", spark: [12, 18, 15, 30, 26, 34, 41, 38, 44, 36, 39, 38] },
+  { id: "agente-pesquisa", tpl: "desktop", state: "running", always: false, cpu: 12, mem: 28, disk: 9, memTxt: "1,1 de 3,8 GB", diskTxt: "2,8 de 31 GB", up: "48 min", task: "Pesquisando tendências de conteúdo", screen: "serp", spark: [8, 9, 14, 10, 12, 11, 13, 9, 15, 12, 11, 12] },
+  { id: "build-ci", tpl: "base", state: "paused", always: false, cpu: 0, mem: 0, disk: 22, memTxt: "—", diskTxt: "6,9 de 31 GB", up: "—", task: "Pausada há 2 h · retoma ao usar", screen: "term", spark: [20, 34, 50, 44, 30, 10, 0, 0, 0, 0, 0, 0] },
+  { id: "scratch", tpl: "minimal", state: "stopped", always: false, cpu: 0, mem: 0, disk: 3, memTxt: "—", diskTxt: "0,9 de 31 GB", up: "—", task: "Desligada", screen: "term", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+];
+const ACTIVITY = [
+  { k: "takeover", t: "agora", text: "Pediu ajuda: CAPTCHA no login do Instagram" },
+  { k: "browser", t: "1 min", text: "Clicou em “Próximo” no YouTube Studio" },
+  { k: "upload", t: "2 min", text: "Enviou video_final_v3.mp4", code: "412 MB" },
+  { k: "browser", t: "3 min", text: "Abriu studio.youtube.com" },
+  { k: "exec", t: "6 min", text: "Renderizou o vídeo", code: "ffmpeg -i bruto.mov -vf scale=1080:-2 video_final_v3.mp4" },
+  { k: "exec", t: "14 min", text: "Baixou as referências", code: "yt-dlp -f mp4 --max 3 \"ytsearch:edição rápida\"" },
+];
+const TPL = { minimal: "Minimal", base: "Base", desktop: "Desktop" };
+const STATE = { running: "Ligada", paused: "Pausada", stopped: "Desligada" };
+
+/* ---------------------------------------------------------------- ícones */
+const P = {
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2.2"/><path d="M9 20h6M12 16v4"/>',
+  term: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5"/>',
+  box: '<path d="M12 3l8 4.2v9.6L12 21l-8-4.2V7.2L12 3z"/><path d="M4 7.2l8 4.3 8-4.3M12 11.5V21"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  dots: '<circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
+  pause: '<path d="M9 6v12M15 6v12"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5L8 5.5z"/>',
+  power: '<path d="M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0"/>',
+  camera: '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6H8l1.2-1.6h5.6L16 6h1.5A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8z"/><circle cx="12" cy="12.4" r="3.4"/>',
+  keys: '<rect x="2.8" y="6" width="18.4" height="12" rx="2.4"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  hand: '<path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.9-2.6L3.8 14a1.5 1.5 0 0 1 2.4-1.8L8 14"/>',
+  sidebar: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M15 4.5v15"/>',
+  bolt: '<path d="M13 3L5 13.5h6L10 21l8-10.5h-6L13 3z"/>',
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.4"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.8"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 4 5.4 4 8.5s-1.4 6.1-4 8.5c-2.6-2.4-4-5.4-4-8.5s1.4-6.1 4-8.5z"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+  chev: '<path d="M8 10l4 4 4-4"/>',
+  back: '<path d="M14 6l-6 6 6 6"/>',
+  cmd: '<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z"/>',
+};
+const ic = (n, s = 18, w = 1.7) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${P[n]}</svg>`;
+const tplIcon = (t) => ({ desktop: "monitor", base: "term", minimal: "box" }[t]);
+const stateDot = (m) => m.takeover ? "alert" : m.state;
+
+function spark(vals, w = 64, h = 22, color = "currentColor") {
+  const max = Math.max(50, ...vals), step = w / (vals.length - 1);
+  const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function ring(pct, size = 54, stroke = 6, color = "var(--accent)") {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  return `<div style="position:relative;width:${size}px;height:${size}px;margin:0 auto"><svg width="${size}" height="${size}" style="transform:rotate(-90deg)"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".14" stroke-width="${stroke}"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg><div style="position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:12.5px" class="num">${pct}%</div></div>`;
+}
+
+/* ---------------------------------------------------------------- a tela da VM (desktop falso) */
+function vmScreen(m, { cursor = false } = {}) {
+  if (m.screen === "term" || m.tpl !== "desktop") {
+    const off = m.state !== "running";
+    return `<div class="vmd term ${off ? "paused" : ""}"><div><span class="p">agent@${m.id}</span>:~$ docker compose ps</div>
+      <div class="d">NAME        STATUS          PORTS</div><div>api         Up 2 hours      0.0.0.0:8000->8000</div><div>worker      Up 2 hours</div>
+      <div><span class="p">agent@${m.id}</span>:~$ npm test</div><div class="d">✓ 128 testes passaram (4,2 s)</div><div><span class="p">agent@${m.id}</span>:~$ ▍</div></div>`;
+  }
+  const dock = `<div class="dock"><i class="chr"></i><i class="trm"></i><i class="fls"></i></div>`;
+  if (m.screen === "serp") {
+    return `<div class="vmd"><div class="wall"></div><div class="chrome">
+      <div class="tabsbar"><div class="ctab"><span class="fav" style="background:#4285f4"></span>tendências edição de vídeo</div><div class="ctab off">Notion — Pauta</div></div>
+      <div class="omni"><span style="color:#888">◀ ▶ ⟳</span><div class="u">google.com/search?q=tendências+edição+de+vídeo+2026</div></div>
+      <div class="pg"><div class="serp"><div class="q">tendências edição de vídeo 2026</div>
+        <div class="r"><small>blog.creatorlab.com › tendencias</small><b>As 9 tendências de edição que vão dominar 2026</b><p>Cortes rápidos com legendas dinâmicas, B-roll gerado e formatos verticais longos lideram o crescimento…</p></div>
+        <div class="r"><small>youtube.com › creators</small><b>O que mudou no algoritmo de Shorts</b><p>Retenção nos primeiros 3 segundos continua sendo o principal sinal. Veja os dados do último trimestre…</p></div>
+        <div class="r"><small>reddit.com › r/VideoEditing</small><b>Qual workflow vocês usam pra publicar todo dia?</b><p>Automatizei render + upload e deixo o agente cuidar das miniaturas…</p></div>
+      </div></div></div>${dock}</div>`;
+  }
+  return `<div class="vmd"><div class="wall"></div><div class="chrome">
+    <div class="tabsbar"><div class="ctab"><span class="fav"></span>Enviar vídeos — YouTube Studio</div><div class="ctab off">Instagram</div></div>
+    <div class="omni"><span style="color:#888">◀ ▶ ⟳</span><div class="u">studio.youtube.com/channel/UCx9…/videos/upload</div></div>
+    <div class="pg"><div class="ytbar"><span class="logo"></span>Studio</div>
+      <div class="modal"><h3>Como montei um computador só para o meu agente</h3>
+        <div class="mbody"><div>
+          <div class="fld"><small>Título (obrigatório)</small>Como montei um computador só para o meu agente</div>
+          <div class="fld big"><small>Descrição</small>Neste vídeo mostro o HyzeVM: uma máquina Linux leve que fica ligada 24 h…</div>
+        </div><div><div class="thumb"></div><div style="font-size:13px;color:#555;margin-top:10px">video_final_v3.mp4<br><span style="color:#888">Link: youtu.be/…</span></div></div></div>
+        <div class="mfoot">Enviando 64%… <div class="prog"><i></i></div><span class="next">Próximo</span></div>
+      </div>
+      ${cursor ? `<div class="agentcur" style="left:860px;top:452px"><div class="ripple" style="left:6px;top:6px"></div><svg width="26" height="26" viewBox="0 0 24 24"><path d="M5 3l14 8-6.2 1.6L10 19 5 3z" fill="#bf5af2" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg><span>Agente</span></div>` : ""}
+    </div></div>${dock}</div>`;
+}
+const screenEl = (m, opts) => `<div class="screenbox" style="width:100%;height:100%">${vmScreen(m, opts)}</div>`;
+
+/* ================================================================ A · Clássico */
+const A = { sel: "agente-videos", tab: "Tela" };
+function renderA() {
+  const m = MACHINES.find((x) => x.id === A.sel);
+  const list = MACHINES.map((x) => `<button class="it ${x.id === A.sel ? "sel" : ""}" data-a-sel="${x.id}"><span class="tile">${ic(tplIcon(x.tpl), 16)}<i class="dot ${stateDot(x)}"></i></span>
+    <span><div class="nm">${x.id}</div><div class="ss">${x.takeover ? "Precisa de você" : STATE[x.state] + (x.always ? " · 24 h" : "")}</div></span></button>`).join("");
+  let body = "";
+  if (A.tab === "Tela") {
+    body = `${m.takeover ? `<div class="notice">${ic("hand", 20)}<div class="g"><b>O agente precisa de você</b><small>${m.takeover}</small></div><button class="btn primary sm">Assumir a tela</button><button class="btn sm">Devolver ao agente</button></div>` : ""}
+      <div class="scr"><div class="frame">${screenEl(m, { cursor: true })}</div>
+      <div class="rail">
+        <div class="box"><h4>AGORA</h4><div style="font-weight:600">${m.task}</div><div style="color:var(--text2);margin-top:2px">há 1 min · ${m.up} ligada</div></div>
+        <div class="box"><h4>USO</h4>
+          <div class="mrow"><span>CPU</span><div class="bar"><i style="width:${m.cpu}%"></i></div><span class="num">${m.cpu}%</span></div>
+          <div class="mrow"><span>Memória</span><div class="bar"><i style="width:${m.mem}%"></i></div><span class="num">${m.mem}%</span></div>
+          <div class="mrow"><span>Disco</span><div class="bar"><i style="width:${m.disk}%"></i></div><span class="num">${m.disk}%</span></div></div>
+        <div class="box"><h4>FERRAMENTAS</h4><div style="display:grid;gap:6px">
+          <button class="btn sm" style="justify-content:flex-start">${ic("camera", 15)}Capturar tela</button>
+          <button class="btn sm" style="justify-content:flex-start">${ic("keys", 15)}Digitar texto</button>
+          <button class="btn sm" style="justify-content:flex-start">${ic("expand", 15)}Modo foco</button></div></div>
+      </div></div>`;
+  } else if (A.tab === "Console") {
+    body = `<div class="cons"><div style="color:#6e7681">agent@${m.id} · os comandos rodam dentro da máquina</div><br><div><span style="color:#58a6ff">$</span> ls ~/videos</div><div>bruto.mov  video_final_v3.mp4  thumbs/</div><br><div><span style="color:#58a6ff">$</span> df -h /</div><div>/dev/vda1   31G  4,6G   25G  16% /</div><br><div><span style="color:#58a6ff">$</span> ▍</div></div>`;
+  } else {
+    body = `<div class="dgrid">
+      <div class="card"><h4>Recursos</h4><div class="row"><span>Processador</span><span class="v">4 núcleos</span></div><div class="row"><span>Memória</span><span class="v">4 GB</span></div><div class="row"><span>Disco</span><span class="v">32 GB</span></div></div>
+      <div class="card"><h4>Acesso</h4><div class="row"><span>SSH</span><span class="v" style="font-family:var(--mono);font-size:12px">hyzevm ssh ${m.id}</span></div><div class="row"><span>Terminal</span><button class="btn sm">Abrir</button></div><div class="row"><span>MCP</span><span class="tag green">conectado</span></div></div>
+      <div class="card"><h4>Comportamento</h4><div class="row"><span>Ligada 24 horas</span><i class="switch ${m.always ? "on" : ""}"></i></div><div class="row"><span>Pausar quando ociosa</span><span class="v">Nunca</span></div></div>
+      <div class="card"><h4>Rede</h4><div class="row"><span>Porta 8000</span><span class="v" style="font-family:var(--mono);font-size:12px">127.0.0.1:51234</span></div><div class="row"><span>Saída</span><span class="v">NAT · IP de casa</span></div></div></div>`;
+  }
+  return `<div class="va"><aside class="side"><div class="sh">Máquinas</div><div style="flex:1">${list}</div>
+      <button class="btn ghost" style="color:var(--accent);justify-content:flex-start">${ic("plus", 16, 2)}Nova máquina</button></aside>
+    <main class="main"><div class="tool"><span class="dot ${stateDot(m)}"></span><h1>${m.id}</h1><span style="color:var(--text3)">${TPL[m.tpl]} · 4 CPU · 4 GB</span><div class="grow"></div>
+      <div class="seg">${["Tela", "Console", "Detalhes"].map((t) => `<button class="${A.tab === t ? "on" : ""}" data-a-tab="${t}">${t}</button>`).join("")}</div><div class="grow"></div>
+      <button class="ibtn" title="Pausar">${ic("pause", 17, 2)}</button><button class="ibtn" title="Desligar">${ic("power", 17)}</button><button class="ibtn">${ic("dots", 17)}</button></div>
+      <div class="body">${body}</div></main></div>`;
+}
+
+/* ================================================================ B · Comando */
+const B = { sel: "agente-videos", tab: "Tela", palette: false };
+function renderB() {
+  const m = MACHINES.find((x) => x.id === B.sel);
+  const li = (x) => `<button class="li ${x.id === B.sel ? "sel" : ""}" data-b-sel="${x.id}"><span class="n"><span class="dot ${stateDot(x)}"></span>${x.id}</span>${spark(x.spark, 60, 24, x.state === "running" ? "var(--accent)" : "var(--text3)")}<span class="s">${x.takeover ? "⚠ " + x.takeover : x.task}</span></button>`;
+  const on = MACHINES.filter((x) => x.state === "running"), off = MACHINES.filter((x) => x.state !== "running");
+  const feed = ACTIVITY.map((e) => `<div class="ev k-${e.k}">${e.text}<small>${e.t}${e.code ? " · " + e.code : ""}</small></div>`).join("");
+  return `<div class="vb-wrap"><div class="vb">
+    <nav class="rail"><button class="ibtn on" title="Máquinas">${ic("grid", 18)}</button><button class="ibtn" title="Atividade">${ic("activity", 18)}</button><button class="ibtn" title="Snapshots">${ic("layers", 18)}</button><button class="ibtn" title="Segredos">${ic("lock", 18)}</button><div class="sp"></div><button class="ibtn">${ic("gear", 18)}</button></nav>
+    <section class="list"><div class="lh"><b>Máquinas</b><button class="ibtn" title="Nova máquina (⌘N)">${ic("plus", 17, 2)}</button></div>
+      <button class="search" data-b-pal>${ic("search", 15)}<span>Buscar ou executar…</span><span class="kbd">⌘</span><span class="kbd">K</span></button>
+      <div class="grp">LIGADAS · ${on.length}</div>${on.map(li).join("")}<div class="grp">PARADAS · ${off.length}</div>${off.map(li).join("")}</section>
+    <section class="detail"><div class="dh"><span class="dot ${stateDot(m)}"></span><h2>${m.id}</h2><span class="tag">${TPL[m.tpl]}</span>${m.always ? '<span class="tag blue">24 h</span>' : ""}<div class="grow"></div>
+        <button class="btn sm ghost">${ic("pause", 14, 2)}Pausar<span class="kbd">P</span></button><button class="btn sm ghost">${ic("power", 14)}Desligar</button><button class="btn sm">${ic("hand", 14)}Assumir<span class="kbd">T</span></button></div>
+      <div class="tabs">${["Tela", "Atividade", "Console", "Ajustes"].map((t) => `<button class="${B.tab === t ? "on" : ""}" data-b-tab="${t}">${t}</button>`).join("")}</div>
+      <div class="split"><div class="stage">${m.takeover ? `<div class="alert">${ic("hand", 16)}<span class="g"><b>Precisa de você</b> — ${m.takeover}</span><button class="btn sm primary">Assumir</button></div>` : ""}
+          <div class="frame">${screenEl(m, { cursor: true })}</div>
+          <div style="display:flex;gap:6px;color:var(--text3);align-items:center"><button class="btn sm ghost">${ic("camera", 14)}Capturar</button><button class="btn sm ghost">${ic("keys", 14)}Digitar</button><button class="btn sm ghost">${ic("expand", 14)}Foco<span class="kbd">F</span></button><span style="flex:1"></span><span class="num">1280×800 · 30 fps · 12 ms</span></div></div>
+        <aside class="insp"><h5>PROPRIEDADES</h5>
+          <div class="prop"><span>Estado</span><span>${STATE[m.state]} · ${m.up}</span></div><div class="prop"><span>Recursos</span><span>4 CPU · 4 GB · 32 GB</span></div>
+          <div class="prop"><span>CPU</span><span class="num">${m.cpu}%</span></div><div class="prop"><span>Memória</span><span class="num">${m.memTxt}</span></div><div class="prop"><span>SSH</span><span class="m">hyzevm ssh ${m.id}</span></div><div class="prop"><span>Portas</span><span class="m">8000 → :51234</span></div>
+          <h5>ATIVIDADE DO AGENTE</h5><div class="feed">${feed}</div></aside></div></section>
+  </div><div class="vb-sb"><span>● 4 máquinas · 2 ligadas</span><span>Host: CPU 23% · RAM 9,1 GB livres</span><span class="grow"></span><span>QEMU 11.1 · HVF</span><span>MCP ativo</span></div>
+  ${B.palette ? `<div class="palette" data-b-pal-close><div class="pbox"><div class="pin">${ic("search", 18)}<span>pau<i>|</i></span><span class="kbd">esc</span></div>
+    <div class="pg"><small>AÇÕES</small><div class="po on">${ic("pause", 16, 2)}<span>Pausar agente-videos</span><span class="kbd">↵</span></div><div class="po">${ic("pause", 16, 2)}<span>Pausar agente-pesquisa</span></div><div class="po">${ic("play", 16)}<span>Retomar build-ci</span></div>
+    <small>IR PARA</small><div class="po">${ic("monitor", 16)}<span>Tela de agente-videos</span><span class="kbd">⌘1</span></div><div class="po">${ic("plus", 16, 2)}<span>Nova máquina</span><span class="kbd">⌘N</span></div></div></div></div>` : ""}</div>`;
+}
+
+/* ================================================================ C · Palco */
+const C = { sel: "agente-videos", insp: false };
+function renderC() {
+  const m = MACHINES.find((x) => x.id === C.sel);
+  const strip = MACHINES.map((x) => `<button class="th ${x.id === C.sel ? "sel" : ""}" data-c-sel="${x.id}"><div class="screenbox">${vmScreen(x)}</div><div class="cap"><span class="dot ${stateDot(x)}"></span>${x.id}</div></button>`).join("");
+  return `<div class="vc"><div class="amb"></div>
+    <div class="top"><button class="pill glass"><span class="dot ${stateDot(m)}"></span>${m.id}<span class="chev">${ic("chev", 14, 2)}</span></button>
+      <div class="ticker"><div class="pill glass"><span class="ag">${ic("bolt", 14, 2)}Agente</span>${m.state === "running" ? "clicou em “Próximo” · " + m.task.toLowerCase() : STATE[m.state]}</div></div>
+      <div class="tools"><button class="round glass" title="Capturar">${ic("camera", 17)}</button><button class="round glass" title="Digitar">${ic("keys", 17)}</button><button class="round glass" title="Pausar">${ic("pause", 17, 2)}</button><button class="round glass" title="Detalhes" data-c-insp>${ic("sidebar", 17)}</button>
+        <button class="take">${ic("hand", 16)}Assumir controle</button></div></div>
+    ${m.takeover ? `<div class="ask">${ic("hand", 18)}O agente precisa de você · ${m.takeover}<button class="btn sm">Assumir agora</button><button class="btn sm ghost">Depois</button></div>` : ""}
+    <div class="stage">${screenEl(m, { cursor: true })}</div>
+    <aside class="insp glass ${C.insp ? "" : "off"}"><h3>${m.id}</h3><div class="sub">${TPL[m.tpl]} · ${STATE[m.state]} há ${m.up}</div>
+      <div class="rings"><div>${ring(m.cpu, 58, 6, "#0a84ff")}<small>CPU</small></div><div>${ring(m.mem, 58, 6, "#30d158")}<small>Memória</small></div><div>${ring(m.disk, 58, 6, "#bf5af2")}<small>Disco</small></div></div>
+      <div><div class="ln"><span>Ligada 24 horas</span><i class="switch ${m.always ? "on" : ""}"></i></div><div class="ln"><span>Recursos</span><span>4 CPU · 4 GB</span></div><div class="ln"><span>SSH</span><span style="font-family:var(--mono);font-size:11.5px">hyzevm ssh ${m.id}</span></div><div class="ln"><span>Porta 8000</span><span>:51234</span></div></div>
+      <div style="display:grid;gap:6px;margin-top:auto"><button class="btn">${ic("term", 15)}Abrir terminal</button><button class="btn" style="color:var(--red)">${ic("power", 15)}Desligar</button></div></aside>
+    <div class="strip glass">${strip}<button class="th new">${ic("plus", 22, 1.8)}</button></div></div>`;
+}
+
+/* ================================================================ D · Painel */
+const D = { page: "home", sel: "agente-videos", modal: false, filter: "Todas" };
+function renderD() {
+  const nav = `<div class="nav"><div class="logo"><i></i>HyzeVM</div><div class="navl"><button class="on" data-d-home>Máquinas</button><button>Atividade<span class="cnt">1</span></button><button>Snapshots</button><button>Segredos</button></div><div class="grow"></div>
+    <div class="srch">${ic("search", 15)}<span>Buscar…</span><span class="kbd">⌘K</span></div><button class="btn primary" data-d-new>${ic("plus", 15, 2.2)}Nova máquina</button><div class="ava"></div></div>`;
+  let content;
+  if (D.page === "home") {
+    const filt = { Todas: () => true, Ligadas: (x) => x.state === "running", "24 h": (x) => x.always, "Precisa de você": (x) => !!x.takeover };
+    const cards = MACHINES.filter(filt[D.filter]).map((x) => `<button class="mc" data-d-open="${x.id}"><div class="screenbox">${vmScreen(x)}</div><div class="mb">
+      <div class="t"><b>${x.id}</b>${x.takeover ? '<span class="tag orange">Precisa de você</span>' : x.state === "running" ? '<span class="tag green"><span class="dot running" style="box-shadow:none;width:6px;height:6px"></span>Ligada</span>' : `<span class="tag">${STATE[x.state]}</span>`}</div>
+      <div class="task">${x.task}</div>
+      <div class="ms"><div>CPU <span class="num" style="float:right">${x.cpu}%</span><div class="bar"><i style="width:${x.cpu}%"></i></div></div><div>RAM <span class="num" style="float:right">${x.mem}%</span><div class="bar"><i style="width:${x.mem}%"></i></div></div><div>Disco <span class="num" style="float:right">${x.disk}%</span><div class="bar"><i style="width:${x.disk}%"></i></div></div></div></div></button>`).join("");
+    content = `<div class="ph"><div><h1>Máquinas</h1><p>Computadores dos seus agentes. 2 ligadas agora, 1 delas 24 horas.</p></div></div>
+      <div class="callout"><div class="ic">${ic("hand", 20)}</div><div class="g"><b>agente-videos precisa de você</b><small>CAPTCHA no login do Instagram · há 1 min</small></div><button class="btn primary" data-d-open="agente-videos">Assumir</button></div>
+      <div class="chips">${["Todas", "Ligadas", "24 h", "Precisa de você"].map((f) => `<button class="chip ${D.filter === f ? "on" : ""}" data-d-filter="${f}">${f}</button>`).join("")}</div>
+      <div class="grid">${cards}<button class="mc add" data-d-new><div><div class="ic">${ic("plus", 22, 2)}</div><b>Nova máquina</b><div style="font-size:12px;margin-top:2px">Pronta em ~10 segundos</div></div></button></div>`;
+  } else {
+    const m = MACHINES.find((x) => x.id === D.sel);
+    const tl = ACTIVITY.map((e) => `<div class="tli k-${e.k}"><span class="k">${ic({ takeover: "hand", browser: "globe", upload: "upload", exec: "term" }[e.k], 14)}</span><div><p>${e.text}</p>${e.code ? `<code>${e.code}</code><br>` : ""}<small>${e.t}</small>
+      ${e.k === "takeover" ? '<div class="cta"><button class="btn sm primary">Assumir a tela</button><button class="btn sm">Devolver</button></div>' : ""}</div></div>`).join("");
+    content = `<div class="crumbs"><button data-d-home>Máquinas</button>${ic("chev", 14, 2).replace("<svg", '<svg style="transform:rotate(-90deg)"')}<b>${m.id}</b></div>
+      <div class="mh"><h1><span class="dot ${stateDot(m)}"></span>${m.id}<span class="tag">${TPL[m.tpl]}</span>${m.always ? '<span class="tag blue">24 h</span>' : ""}</h1>
+        <div class="acts"><button class="btn">${ic("term", 15)}Terminal</button><button class="btn">${ic("pause", 15, 2)}Pausar</button><button class="btn">${ic("dots", 15)}</button></div></div>
+      <div class="two"><div class="panel"><div class="ptop"><b>Tela</b><div style="display:flex;gap:6px;align-items:center"><span class="tag green">Ao vivo</span><button class="ibtn">${ic("camera", 16)}</button><button class="ibtn">${ic("keys", 16)}</button><button class="ibtn">${ic("expand", 16)}</button></div></div><div class="screenbox">${vmScreen(m, { cursor: true })}</div></div>
+        <div class="panel"><div class="ptop"><b>Atividade do agente</b><span style="color:var(--text3);font-size:12px">ao vivo</span></div><div class="tl">${tl}</div></div></div>
+      <div class="stats"><div class="st"><small>CPU</small><div class="big num">${m.cpu}<span>%</span></div><div class="bar"><i style="width:${m.cpu}%"></i></div></div>
+        <div class="st"><small>Memória</small><div class="big num">1,6<span>de 3,8 GB</span></div><div class="bar"><i style="width:${m.mem}%"></i></div></div>
+        <div class="st"><small>Disco</small><div class="big num">4,6<span>de 31 GB</span></div><div class="bar"><i style="width:${m.disk}%"></i></div></div>
+        <div class="st"><small>Ligada há</small><div class="big num">3 h 12<span>min</span></div><div style="color:var(--text3);font-size:12px">volta sozinha se cair</div></div></div>`;
+  }
+  const modal = D.modal ? `<div class="modal" data-d-close><div class="mbox"><h2>Nova máquina</h2><div class="lead">Um computador Linux só para o seu agente.</div>
+    <label>Nome</label><div class="inp" style="display:flex;align-items:center">agente-2</div>
+    <label>O que ela precisa ter</label><div class="tps">
+      <div class="tp"><div class="art">${ic("box", 30, 1.4)}</div><div class="tx"><b>Só terminal</b><span>Debian puro, pronto em 10 s</span></div></div>
+      <div class="tp"><div class="art">${ic("term", 30, 1.4)}</div><div class="tx"><b>Desenvolvimento</b><span>Docker, Node, Python</span></div></div>
+      <div class="tp on"><div class="art">${ic("monitor", 30, 1.4)}</div><div class="tx"><b>Com tela</b><span>Navegador, dock e vídeo</span></div></div></div>
+    <label>Tamanho</label><div class="sizes"><div class="sz"><b>Leve</b><span>2 CPU · 2 GB</span></div><div class="sz on"><b>Padrão</b><span>4 CPU · 4 GB</span></div><div class="sz"><b>Forte</b><span>8 CPU · 12 GB</span></div></div>
+    <div class="opt"><div><b>Ligada 24 horas</b><small>Sobe com o computador e volta sozinha se cair</small></div><i class="switch on"></i></div>
+    <div class="mf"><span class="grow">Disco de 32 GB · Ajustes avançados</span><button class="btn" data-d-close-btn>Cancelar</button><button class="btn primary">Criar máquina</button></div></div></div>` : "";
+  return `<div class="vd">${nav}<div class="content">${content}</div>${modal}</div>`;
+}
+
+/* ================================================================ página */
+const VARIANTS = {
+  a: { render: renderA, theme: "light", note: "Clássico macOS: barra lateral + barra de ferramentas unificada. A tela vem com um painel ao lado (o que o agente está fazendo, uso e ferramentas). Familiar e calmo." },
+  b: { render: renderB, theme: "dark", note: "Comando: denso e rápido como Linear/Raycast. Lista com gráficos, inspetor à direita com a atividade do agente, ⌘K para tudo (clique na busca). Para quem usa muito." },
+  c: { render: renderC, theme: "dark", note: "Palco: a tela da VM é a protagonista. Controles flutuantes de vidro, as máquinas numa faixa de miniaturas ao vivo embaixo e um inspetor que desliza (ícone de painel)." },
+  d: { render: renderD, theme: "light", note: "Painel: cara de produto de startup. Grade de máquinas com miniaturas ao vivo; ao abrir, a tela fica ao lado da linha do tempo do agente. Criação por perguntas simples (clique em Nova máquina)." },
+};
+let cur = "abcd".includes(location.hash.slice(1, 2)) && location.hash.length > 1 ? location.hash[1] : "d";
+if (location.hash.includes("pal")) B.palette = true;
+if (location.hash.includes("insp")) C.insp = true;
+if (location.hash.includes("open")) D.page = "machine";
+if (location.hash.includes("new")) D.modal = true;
+const themeOverride = {};
+function render() {
+  const v = VARIANTS[cur], theme = themeOverride[cur] || v.theme;
+  document.querySelectorAll("#picker button").forEach((b) => b.classList.toggle("on", b.dataset.v === cur));
+  document.getElementById("note").textContent = v.note;
+  document.getElementById("theme").innerHTML = `${ic(theme === "dark" ? "sun" : "moon", 15)}${theme === "dark" ? "Ver claro" : "Ver escuro"}`;
+  document.getElementById("scaler").innerHTML = `<div class="win ${theme}"><div class="lights"><i></i><i></i><i></i></div>${v.render()}</div>`;
+  fit();
+}
+function fit() {
+  const w = document.getElementById("wrap"), s = Math.min((w.clientWidth - 48) / 1280, (w.clientHeight - 40) / 800, 1.15);
+  document.getElementById("scaler").style.transform = `translate(-50%, -50%) scale(${s})`;
+}
+addEventListener("resize", fit);
+document.getElementById("picker").onclick = (e) => { const b = e.target.closest("button"); if (b) { cur = b.dataset.v; render(); } };
+document.getElementById("theme").onclick = () => { const v = VARIANTS[cur]; themeOverride[cur] = (themeOverride[cur] || v.theme) === "dark" ? "light" : "dark"; render(); };
+document.getElementById("scaler").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-a-sel],[data-a-tab],[data-b-sel],[data-b-tab],[data-b-pal],[data-b-pal-close],[data-c-sel],[data-c-insp],[data-d-open],[data-d-home],[data-d-new],[data-d-close],[data-d-close-btn],[data-d-filter]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.aSel) A.sel = d.aSel; if (d.aTab) A.tab = d.aTab;
+  if (d.bSel) B.sel = d.bSel; if (d.bTab) B.tab = d.bTab; if ("bPal" in d) B.palette = true; if ("bPalClose" in d && e.target === t) B.palette = false;
+  if (d.cSel) C.sel = d.cSel; if ("cInsp" in d) C.insp = !C.insp;
+  if (d.dOpen) { D.page = "machine"; D.sel = d.dOpen; } if ("dHome" in d) D.page = "home"; if ("dNew" in d) D.modal = true; if (d.dFilter) D.filter = d.dFilter;
+  if (("dClose" in d && e.target === t) || "dCloseBtn" in d) D.modal = false;
+  render();
+});
+addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && cur === "b") { e.preventDefault(); B.palette = !B.palette; render(); }
+  if (e.key === "Escape") { B.palette = false; D.modal = false; render(); }
+  if (["1", "2", "3", "4"].includes(e.key) && !e.metaKey) { cur = "abcd"[+e.key - 1]; render(); }
+});
+render();
+</script>
+</body>
+</html>

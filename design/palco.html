@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyzeVM — Palco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font: 13px/1.4 var(--sys); -webkit-font-smoothing: antialiased; background: #000; color: #ededed; overflow: hidden; }
+button, input { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: default; }
+svg { display: block; flex: none; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+
+/* ------------------------------------------------------------ página de revisão */
+.page { height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); }
+.pagebar { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #1f1f1f; background: #0a0a0a; overflow-x: auto; }
+.pagebar .brand { font-weight: 600; white-space: nowrap; } .pagebar .brand span { color: #8f8f8f; font-weight: 400; }
+.states { display: flex; gap: 2px; }
+.states button { height: 26px; padding: 0 10px; border-radius: 6px; color: #a1a1a1; white-space: nowrap; cursor: pointer; }
+.states button:hover { color: #ededed; background: #1a1a1a; }
+.states button.on { background: #ededed; color: #0a0a0a; font-weight: 500; }
+.pagebar .grow { flex: 1; }
+.themebtn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2e2e2e; color: #ededed; white-space: nowrap; cursor: pointer; }
+.stagewrap { position: relative; overflow: hidden; background: #050505; }
+.scaler { position: absolute; left: 50%; top: 50%; width: 1280px; height: 800px; transform: translate(-50%, -50%); }
+
+/* ------------------------------------------------------------ janela e tokens */
+.win { position: relative; width: 1280px; height: 800px; border-radius: 11px; overflow: hidden; display: flex; flex-direction: column;
+  --tb: #1c1c1c; --well: #0b0b0b; --panel: #161616; --group: #1f1f1f; --field: #262626; --ctl: #2c2c2c; --ctl-h: #363636;
+  --fg: #ededed; --fg-2: #a1a1a1; --fg-3: #6b6b6b;
+  --line: #2a2a2a; --line-2: #333333; --hair: rgba(255,255,255,.07); --zebra: rgba(255,255,255,.025); --hover: rgba(255,255,255,.06);
+  --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22); --amber: #ffb224; --amber-soft: rgba(255,178,36,.1); --green: #3fb950; --red: #ff6166;
+  --menu: rgba(38,38,38,.96); --shadow: 0 0 0 .5px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.08) inset;
+  background: var(--panel); color: var(--fg); box-shadow: 0 0 0 1px #000, 0 0 0 1.5px rgba(255,255,255,.1), 0 30px 90px rgba(0,0,0,.75); }
+.win.light {
+  --tb: #f3f3f3; --well: #e6e6e6; --panel: #fbfbfb; --group: #ffffff; --field: #ffffff; --ctl: #ffffff; --ctl-h: #f2f2f2;
+  --fg: #1d1d1f; --fg-2: #6e6e73; --fg-3: #a0a0a5;
+  --line: #dedede; --line-2: #d2d2d2; --hair: rgba(0,0,0,.07); --zebra: rgba(0,0,0,.025); --hover: rgba(0,0,0,.05);
+  --accent: #007aff; --accent-soft: rgba(0,122,255,.16); --amber: #c27c0e; --amber-soft: #fff5e1; --green: #28a745; --red: #d70015;
+  --menu: rgba(246,246,246,.97);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.3), 0 30px 90px rgba(0,0,0,.55); }
+.lights { position: absolute; top: 20px; left: 20px; display: flex; gap: 8px; z-index: 60; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.25); } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+
+/* ------------------------------------------------------------ controles nativos */
+.tbtn { height: 28px; min-width: 28px; padding: 0 6px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--fg-2); }
+.tbtn:hover { background: var(--hover); color: var(--fg); }
+.tbtn.on { background: var(--hover); color: var(--fg); }
+.push { height: 24px; padding: 0 10px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 13px; white-space: nowrap; background: var(--ctl); box-shadow: 0 0 0 .5px rgba(0,0,0,.4), inset 0 .5px 0 rgba(255,255,255,.08); color: var(--fg); }
+.win.light .push { box-shadow: 0 0 0 .5px rgba(0,0,0,.18), 0 .5px 1.5px rgba(0,0,0,.08); }
+.push:hover { background: var(--ctl-h); }
+.push.default { background: var(--accent); color: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.3), inset 0 .5px 0 rgba(255,255,255,.18); }
+.push.strong { background: var(--fg); color: var(--panel); box-shadow: none; font-weight: 500; }
+.push.lg { height: 28px; padding: 0 12px; }
+.push.red { color: var(--red); }
+.vsep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; flex: none; }
+.popup { height: 24px; padding: 0 6px 0 9px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; background: var(--ctl); box-shadow: 0 0 0 .5px rgba(0,0,0,.4), inset 0 .5px 0 rgba(255,255,255,.08); font-size: 13px; white-space: nowrap; }
+.win.light .popup { box-shadow: 0 0 0 .5px rgba(0,0,0,.18), 0 .5px 1.5px rgba(0,0,0,.08); }
+.popup .ud { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.seg { display: inline-flex; height: 26px; padding: 2px; border-radius: 7px; background: var(--hover); gap: 0; }
+.seg button { padding: 0 14px; border-radius: 5px; color: var(--fg-2); font-size: 13px; position: relative; }
+.seg button + button::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 1px; background: var(--line-2); }
+.seg button.on + button::before, .seg button.on::before { display: none; }
+.seg button.on { background: var(--ctl); color: var(--fg); box-shadow: 0 0 0 .5px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.2); }
+.win.light .seg button.on { box-shadow: 0 0 0 .5px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08); }
+.seg .cnt { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 8px; font-size: 10.5px; font-weight: 700; background: var(--amber); color: #1a1100; vertical-align: 1px; }
+.switch { width: 30px; height: 18px; border-radius: 9px; background: var(--ctl-h); position: relative; flex: none; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.3); }
+.switch::after { content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .15s; }
+.switch.on { background: var(--accent); } .switch.on::after { transform: translateX(12px); }
+.check { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); color: #fff; display: grid; place-items: center; flex: none; }
+.radio { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--ctl); box-shadow: inset 0 0 0 .5px var(--line-2), 0 .5px 1px rgba(0,0,0,.2); }
+.radio.on { background: var(--accent); box-shadow: inset 0 0 0 4px var(--accent); position: relative; }
+.radio.on::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: #fff; }
+.field { height: 24px; border-radius: 6px; display: flex; align-items: center; padding: 0 8px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--line-2), inset 0 .5px 1px rgba(0,0,0,.15); font-size: 13px; }
+.field.focus { box-shadow: 0 0 0 3.5px var(--accent-soft), inset 0 0 0 1px var(--accent); }
+.field .caret { width: 1px; height: 14px; background: var(--fg); margin-left: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: var(--fg-3); }
+.dot.running { background: var(--green); } .dot.paused { background: var(--fg-3); } .dot.wait { background: var(--amber); animation: pulse 1.4s ease-in-out infinite; } .dot.you { background: var(--accent); }
+@keyframes pulse { 50% { opacity: .35; } }
+.kbd { font: 12px var(--sys); color: var(--fg-3); letter-spacing: .02em; }
+.tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 500; background: var(--hover); color: var(--fg-2); }
+.tag.amber { background: var(--amber-soft); color: var(--amber); } .tag.green { color: var(--green); } .tag.blue { background: var(--accent-soft); color: var(--accent); }
+.lvl { height: 4px; border-radius: 2px; background: var(--hover); overflow: hidden; }
+.lvl i { display: block; height: 100%; border-radius: 2px; background: var(--fg-2); }
+.lvl i.warn { background: var(--amber); }
+
+/* ------------------------------------------------------------ barra de ferramentas unificada */
+.toolbar { position: relative; height: 52px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 84px; background: var(--tb); border-bottom: 1px solid var(--line); }
+.toolbar .title { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; font-weight: 600; font-size: 13px; }
+.toolbar .title:hover { background: var(--hover); }
+.toolbar .title .sub { color: var(--fg-3); font-weight: 400; }
+.toolbar .title svg { color: var(--fg-3); }
+.toolbar .center { position: absolute; left: 50%; transform: translateX(-50%); }
+.toolbar .grow { flex: 1; }
+.banner { height: 40px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; background: var(--amber-soft); border-bottom: 1px solid var(--line); font-size: 13px; }
+.banner > svg { color: var(--amber); }
+.banner .g { flex: 1; } .banner b { font-weight: 600; } .banner .g span { color: var(--fg-2); }
+
+/* ------------------------------------------------------------ área */
+.content { flex: 1; min-height: 0; display: flex; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--well); }
+.stagebox { flex: 1; min-height: 0; container-type: size; display: grid; place-items: center; padding: 18px; }
+.frame { position: relative; width: min(100cqw - 36px, (100cqh - 36px) * 1.6); aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--line), 0 10px 40px rgba(0,0,0,.35); }
+.win.light .frame { box-shadow: 0 0 0 1px rgba(0,0,0,.14), 0 10px 30px rgba(0,0,0,.12); }
+.frame.you { box-shadow: 0 0 0 2px var(--accent), 0 10px 40px rgba(0,0,0,.35); } .frame.wait { box-shadow: 0 0 0 2px var(--amber), 0 10px 40px rgba(0,0,0,.35); }
+.screenbox { position: absolute; inset: 0; overflow: hidden; container-type: inline-size; }
+.hud { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; color: #fff; background: rgba(20,20,20,.86); box-shadow: 0 0 0 .5px rgba(255,255,255,.14); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); white-space: nowrap; }
+.hud .kbd { color: rgba(255,255,255,.55); }
+.shelf { height: 102px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: var(--tb); border-top: 1px solid var(--line); }
+.th { width: 136px; flex: none; padding: 6px; border-radius: 8px; text-align: left; }
+.th:hover { background: var(--hover); }
+.th.sel { background: var(--accent-soft); }
+.th .mini { position: relative; height: 58px; border-radius: 4px; overflow: hidden; background: #000; box-shadow: 0 0 0 .5px var(--line-2); }
+.th .lbl { display: flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12px; }
+.th .lbl span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th .flag { position: absolute; top: 4px; right: 4px; z-index: 2; }
+.th.add .mini { display: grid; place-items: center; background: transparent; box-shadow: none; outline: 1px dashed var(--line-2); outline-offset: -1px; color: var(--fg-3); }
+.th.add .lbl { color: var(--fg-2); }
+.statusbar { height: 26px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--tb); border-top: 1px solid var(--line); font-size: 11.5px; color: var(--fg-2); }
+.statusbar b { font-weight: 500; color: var(--fg); }
+.statusbar .grow { flex: 1; }
+.statusbar .m { font: 11px var(--mono); color: var(--fg-3); }
+
+/* inspetor */
+.insp { width: 272px; flex: none; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; }
+.isec { padding: 12px 14px 14px; border-bottom: 1px solid var(--line); }
+.isec:last-child { border-bottom: 0; }
+.isec h6 { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; color: var(--fg-2); margin-bottom: 8px; }
+.isec h6 button { font-size: 11px; font-weight: 400; color: var(--accent); }
+.irow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; font-size: 12.5px; }
+.irow > span:first-child { color: var(--fg-2); }
+.irow .m { font: 11.5px var(--mono); }
+.usage { display: grid; gap: 9px; }
+.usage .u { display: grid; gap: 4px; }
+.usage .u div:first-child { display: flex; justify-content: space-between; font-size: 12.5px; }
+.usage .u div:first-child span:first-child { color: var(--fg-2); }
+.now b { display: block; font-weight: 600; font-size: 13px; } .now p { color: var(--fg-2); font-size: 12px; margin-top: 1px; }
+.feed { display: grid; gap: 9px; }
+.fi { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; font-size: 12.5px; align-items: start; }
+.fi svg { color: var(--fg-3); margin-top: 2px; } .fi.ask svg { color: var(--amber); }
+.fi small { color: var(--fg-3); font-size: 11.5px; display: block; }
+.fi time { font: 11px var(--mono); color: var(--fg-3); margin-top: 1px; }
+.copyfield { display: flex; align-items: center; justify-content: space-between; height: 26px; padding: 0 3px 0 8px; border-radius: 6px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--line-2); font: 11.5px var(--mono); }
+.copyfield button { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--fg-3); }
+
+/* capa (pausada) */
+.cover { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(0,0,0,.55); }
+.alertbox { width: 300px; padding: 18px 18px 14px; border-radius: 12px; background: var(--menu); box-shadow: 0 0 0 .5px rgba(0,0,0,.6), 0 20px 50px rgba(0,0,0,.5), inset 0 0 0 1px var(--hair); text-align: center; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.alertbox .ai { width: 44px; height: 44px; margin: 0 auto 10px; border-radius: 10px; display: grid; place-items: center; background: var(--hover); color: var(--fg-2); }
+.alertbox b { font-size: 13px; font-weight: 600; } .alertbox p { color: var(--fg-2); font-size: 11.5px; margin: 4px 0 14px; line-height: 1.45; }
+.alertbox .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* terminal */
+.term { position: absolute; inset: 0; background: #0a0a0a; font: 12.5px/1.7 var(--mono); color: #d4d4d4; display: flex; flex-direction: column; }
+.term .lines { flex: 1; padding: 12px 0; overflow: hidden; }
+.term .ln { display: grid; grid-template-columns: 46px 1fr; }
+.term .ln i { font-style: normal; color: #444; text-align: right; padding-right: 14px; }
+.term .p { color: #ededed; } .term .d { color: #8a8a8a; } .term .ok { color: #62c073; } .term .wn { color: #ffb224; }
+.term .tin { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-top: 1px solid #1f1f1f; color: #6b6b6b; }
+.term .tin b { color: #ededed; font-weight: 500; }
+
+/* ------------------------------------------------------------ Atividade (tabela nativa) */
+.table { flex: 1; min-height: 0; overflow: auto; background: var(--panel); }
+.thead, .trow { display: grid; grid-template-columns: 210px minmax(0, 1fr) minmax(0, 1.25fr) 120px 64px; align-items: center; column-gap: 12px; padding: 0 14px; }
+.thead { position: sticky; top: 0; height: 28px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 11.5px; font-weight: 500; color: var(--fg-2); z-index: 1; }
+.thead span { display: inline-flex; align-items: center; gap: 4px; }
+.thead span + span { border-left: 1px solid var(--line); padding-left: 10px; margin-left: -10px; }
+.trow { height: 30px; font-size: 12.5px; }
+.trow:nth-child(even) { background: var(--zebra); }
+.trow.sel { background: var(--accent); color: #fff; }
+.trow.sel * { color: #fff !important; }
+.trow .a { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.trow .a svg { color: var(--fg-3); } .trow .a.ask svg { color: var(--amber); }
+.trow .a span, .trow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow .c { font: 11.5px var(--mono); color: var(--fg-2); }
+.trow .t { font: 11.5px var(--mono); color: var(--fg-3); text-align: right; }
+.trow .d2 { color: var(--fg-2); }
+
+/* ------------------------------------------------------------ Console */
+.console { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0a0a0a; color: #d4d4d4; }
+.ctabs { height: 30px; flex: none; display: flex; align-items: flex-end; gap: 1px; padding: 0 8px; background: #141414; border-bottom: 1px solid #262626; }
+.ctabs button { height: 26px; padding: 0 14px; border-radius: 6px 6px 0 0; font-size: 12px; color: #8a8a8a; display: inline-flex; align-items: center; gap: 6px; }
+.ctabs button.on { background: #0a0a0a; color: #ededed; box-shadow: 0 0 0 1px #262626; clip-path: inset(-1px -1px 0 -1px); }
+.console .lb { flex: 1; overflow: auto; padding: 10px 0; font: 12.5px/1.75 var(--mono); }
+.console .l { display: grid; grid-template-columns: 82px 1fr; padding: 0 14px; }
+.console .l time { color: #4d4d4d; }
+.console .l.cmd span { color: #ededed; } .console .l.cmd span::before { content: "$ "; color: #6b6b6b; }
+.console .l.out span { color: #8a8a8a; } .console .l.ok span { color: #62c073; } .console .l.wn span { color: #ffb224; }
+.console .cin { height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-top: 1px solid #1f1f1f; font: 12.5px var(--mono); color: #6b6b6b; }
+.console .cin b { color: #ededed; font-weight: 500; }
+
+/* ------------------------------------------------------------ Ajustes (formulário estilo Ajustes do Sistema) */
+.prefs { flex: 1; min-height: 0; overflow: auto; background: var(--panel); padding: 22px 0 30px; }
+.prefs .col { width: 560px; margin: 0 auto; }
+.pgroup { border-radius: 9px; background: var(--group); box-shadow: inset 0 0 0 .5px var(--line-2); margin-bottom: 6px; }
+.win.light .pgroup { box-shadow: 0 0 0 .5px rgba(0,0,0,.1); }
+.prow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; padding: 7px 12px; font-size: 13px; }
+.prow + .prow { box-shadow: inset 0 1px 0 var(--hair); }
+.prow .lb small { display: block; color: var(--fg-2); font-size: 11.5px; margin-top: 1px; }
+.prow .v { color: var(--fg-2); }
+.prow .m { font: 12px var(--mono); color: var(--fg); }
+.pnote { color: var(--fg-3); font-size: 11.5px; padding: 0 12px 18px; }
+.ptitle { font-size: 13px; font-weight: 600; padding: 0 2px 6px 4px; color: var(--fg); margin-top: 6px; }
+.prefs .danger { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+/* ------------------------------------------------------------ folha (sheet) */
+.sheetwrap { position: absolute; inset: 52px 0 0 0; z-index: 70; display: flex; justify-content: center; background: rgba(0,0,0,.18); }
+.sheet { margin-top: 8px; width: 520px; height: max-content; border-radius: 12px; background: var(--panel); box-shadow: 0 0 0 .5px rgba(0,0,0,.7), inset 0 0 0 1px var(--hair), 0 22px 60px rgba(0,0,0,.5); animation: drop .22s cubic-bezier(.2,.8,.2,1); overflow: hidden; }
+.win.light .sheet { box-shadow: 0 0 0 .5px rgba(0,0,0,.25), 0 22px 60px rgba(0,0,0,.25); }
+@keyframes drop { from { transform: translateY(-14px); opacity: 0; } }
+.sheet .sb { padding: 18px 20px 6px; }
+.sheet h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+.form { display: grid; grid-template-columns: 112px 1fr; gap: 12px 12px; align-items: start; }
+.form > label { text-align: right; padding-top: 4px; font-size: 13px; color: var(--fg); }
+.opts { display: grid; gap: 2px; }
+.opt { display: grid; grid-template-columns: 14px 26px 1fr; gap: 8px; align-items: center; padding: 6px 8px 6px 4px; border-radius: 7px; text-align: left; }
+.opt:hover { background: var(--hover); }
+.opt.on { background: var(--hover); }
+.opt .oi { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; background: var(--ctl); box-shadow: 0 0 0 .5px var(--line-2); color: var(--fg-2); }
+.opt b { font-weight: 500; display: block; font-size: 13px; } .opt span { color: var(--fg-2); font-size: 11.5px; }
+.opt .meta { font: 11px var(--mono); color: var(--fg-3); margin-left: 4px; }
+.help { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--ctl); box-shadow: 0 0 0 .5px rgba(0,0,0,.35); color: var(--fg-2); font-size: 12px; font-weight: 600; }
+.sheet .sf { display: flex; align-items: center; gap: 8px; padding: 14px 20px 16px; }
+.sheet .sf .grow { flex: 1; }
+.progress { height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; margin: 6px 0 8px; }
+.progress i { display: block; height: 100%; width: 62%; border-radius: 3px; background: var(--accent); }
+.disclose { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-2); font-size: 12px; margin-top: 10px; }
+.log { margin-top: 8px; border-radius: 6px; background: #0a0a0a; padding: 8px 10px; font: 11.5px/1.65 var(--mono); color: #8a8a8a; box-shadow: inset 0 0 0 .5px var(--line-2); }
+.log b { color: #62c073; font-weight: 400; }
+
+/* ------------------------------------------------------------ menus nativos */
+.menu { position: absolute; z-index: 75; min-width: 240px; padding: 5px; border-radius: 9px; background: var(--menu); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: 0 0 0 .5px rgba(0,0,0,.8), inset 0 0 0 1px var(--hair), 0 12px 36px rgba(0,0,0,.45); font-size: 13px; }
+.win.light .menu { box-shadow: 0 0 0 .5px rgba(0,0,0,.22), 0 12px 36px rgba(0,0,0,.18); }
+.menu .mh { padding: 3px 10px 3px 26px; font-size: 11.5px; font-weight: 600; color: var(--fg-3); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 10px 0 6px; border-radius: 5px; text-align: left; }
+.mi .ck { width: 14px; display: grid; place-items: center; }
+.mi .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi .mt { width: 30px; height: 18px; border-radius: 3px; overflow: hidden; position: relative; background: #000; box-shadow: 0 0 0 .5px var(--line-2); flex: none; }
+.mi:hover, .mi.hl { background: var(--accent); color: #fff; }
+.mi:hover .kbd, .mi.hl .kbd, .mi:hover .sub2, .mi.hl .sub2 { color: rgba(255,255,255,.75); }
+.mi .sub2 { color: var(--fg-3); font-size: 12px; }
+.menu hr { border: 0; height: 1px; background: var(--line-2); margin: 5px 10px; }
+
+/* paleta */
+.pal { position: absolute; inset: 0; z-index: 80; display: grid; justify-items: center; padding-top: 150px; }
+.pal .box { width: 600px; height: max-content; border-radius: 14px; background: var(--menu); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); box-shadow: 0 0 0 .5px rgba(0,0,0,.8), inset 0 0 0 1px var(--hair), 0 30px 80px rgba(0,0,0,.55); overflow: hidden; }
+.pal .q { height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 18px; border-bottom: 1px solid var(--line); }
+.pal .q svg { color: var(--fg-3); } .pal .q span { flex: 1; } .pal .q i { font-style: normal; color: var(--fg-3); }
+.pal .gr { padding: 6px; }
+.pal .gr small { display: block; padding: 6px 10px 3px; font-size: 11.5px; font-weight: 600; color: var(--fg-3); }
+.pal .mi { height: 32px; padding: 0 10px; border-radius: 7px; }
+.pal .mi svg { color: var(--fg-2); } .pal .mi.hl svg, .pal .mi:hover svg { color: #fff; }
+
+/* vazio */
+.empty { flex: 1; display: grid; place-items: center; background: var(--panel); }
+.empty .wrap { width: 520px; text-align: center; }
+.empty .glyph { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 14px; display: grid; place-items: center; background: var(--hover); color: var(--fg-2); }
+.empty h2 { font-size: 17px; font-weight: 600; }
+.empty p { color: var(--fg-2); margin: 4px 0 18px; }
+.empty .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 26px; text-align: left; }
+.empty .qt { border-radius: 9px; padding: 8px; background: var(--group); box-shadow: inset 0 0 0 .5px var(--line-2); }
+.empty .qt:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.empty .qt .pv { position: relative; height: 74px; border-radius: 5px; overflow: hidden; background: #000; margin-bottom: 8px; }
+.empty .qt b { font-weight: 500; display: block; } .empty .qt span { font-size: 11.5px; color: var(--fg-2); }
+.empty .or { color: var(--fg-3); font-size: 11.5px; margin-top: 22px; }
+
+/* ------------------------------------------------------------ tela falsa da VM */
+.vmd { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; transform-origin: 0 0; transform: scale(calc(100cqw / 1280px)); font-family: Arial, Helvetica, sans-serif; color: #1f1f1f; }
+.vmd .wall { position: absolute; inset: 0; background: #1b1b1d; }
+.vmd .dock { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 16px; padding: 12px 16px; border-radius: 22px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); }
+.vmd .dock i { width: 52px; height: 52px; border-radius: 13px; display: block; }
+.vmd .dock .chr { border-radius: 50%; background: conic-gradient(from -30deg, #ea4335 0 33%, #34a853 0 66%, #fbbc05 0); position: relative; }
+.vmd .dock .chr::after { content: ""; position: absolute; inset: 15px; border-radius: 50%; background: #4285f4; border: 4px solid #fff; }
+.vmd .dock .trm { background: #26262a; border: 2px solid #8a8a8e; } .vmd .dock .fls { background: linear-gradient(#e9e9ec, #c7c7cc); }
+.vmd .chrome { position: absolute; left: 0; top: 0; right: 0; bottom: 96px; background: #fff; display: flex; flex-direction: column; }
+.vmd .tabsbar { height: 40px; background: #e3e7ee; display: flex; align-items: flex-end; padding: 0 10px; gap: 4px; }
+.vmd .ctab { height: 32px; padding: 0 14px; border-radius: 10px 10px 0 0; background: #fff; display: flex; align-items: center; gap: 9px; font-size: 13px; width: 250px; white-space: nowrap; overflow: hidden; }
+.vmd .ctab.off { background: transparent; color: #555; }
+.vmd .fav { width: 16px; height: 16px; border-radius: 4px; background: #ff0033; flex: none; }
+.vmd .omni { height: 46px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #e3e3e3; }
+.vmd .omni .u { flex: 1; height: 32px; border-radius: 16px; background: #eef0f3; display: flex; align-items: center; padding: 0 16px; font-size: 14px; color: #333; }
+.vmd .pg { flex: 1; position: relative; background: #f9f9f9; overflow: hidden; }
+.vmd .ytbar { height: 56px; background: #fff; border-bottom: 1px solid #e5e5e5; display: flex; align-items: center; padding: 0 22px; gap: 12px; font-weight: 600; font-size: 18px; }
+.vmd .ytbar .logo { width: 30px; height: 21px; border-radius: 6px; background: #ff0033; position: relative; }
+.vmd .ytbar .logo::after { content: ""; position: absolute; left: 12px; top: 6px; border: 5px solid transparent; border-left: 8px solid #fff; }
+.vmd .modal2 { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); width: 860px; height: 470px; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+.vmd .modal2 h3 { font-size: 20px; padding: 20px 26px; border-bottom: 1px solid #e5e5e5; font-weight: 600; }
+.vmd .mbody { flex: 1; display: grid; grid-template-columns: 1fr 300px; gap: 26px; padding: 22px 26px; }
+.vmd .fld { border: 1px solid #ccc; border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; font-size: 14px; }
+.vmd .fld small { display: block; color: #666; font-size: 12px; margin-bottom: 3px; }
+.vmd .fld.big { height: 120px; }
+.vmd .thumb { height: 170px; border-radius: 8px; background: #3a3f47; }
+.vmd .mfoot { height: 64px; border-top: 1px solid #e5e5e5; display: flex; align-items: center; gap: 14px; padding: 0 26px; font-size: 13px; color: #555; }
+.vmd .prog { flex: 1; height: 6px; background: #e5e5e5; border-radius: 3px; overflow: hidden; } .vmd .prog i { display: block; width: 64%; height: 100%; background: #065fd4; }
+.vmd .next { background: #065fd4; color: #fff; padding: 9px 18px; border-radius: 18px; font-weight: 600; }
+.vmd .captcha { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 420px; background: #fff; border-radius: 4px; box-shadow: 0 20px 60px rgba(0,0,0,.25); padding: 0 8px 8px; }
+.vmd .captcha .cb { margin: 0 -8px; padding: 14px 20px; background: #4a90e2; color: #fff; font-size: 14px; } .vmd .captcha .cb b { display: block; font-size: 22px; }
+.vmd .captcha .g9 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.vmd .captcha .g9 i { height: 100px; background: #8a8f78; } .vmd .captcha .g9 i:nth-child(2n) { background: #6f7c8c; }
+.vmd .captcha .cf { display: flex; justify-content: flex-end; } .vmd .captcha .cf span { background: #4a90e2; color: #fff; padding: 8px 18px; border-radius: 2px; font-weight: 600; font-size: 13px; }
+.vmd .cur { position: absolute; z-index: 5; }
+.vmd .cur span { position: absolute; left: 22px; top: 22px; white-space: nowrap; padding: 3px 9px; border-radius: 6px; color: #fff; font: 600 14px/1.4 var(--sys); }
+.vmd .cur .ring { position: absolute; left: 6px; top: 6px; border-radius: 50%; border: 2px solid; transform: translate(-50%, -50%); animation: rip 1.6s ease-out infinite; }
+@keyframes rip { from { opacity: .8; width: 12px; height: 12px; } to { opacity: 0; width: 64px; height: 64px; } }
+.vmd .serp { padding: 28px 60px; }
+.vmd .serp .q { width: 620px; height: 44px; border-radius: 22px; border: 1px solid #dfe1e5; box-shadow: 0 1px 6px rgba(32,33,36,.2); display: flex; align-items: center; padding: 0 20px; font-size: 16px; margin-bottom: 26px; }
+.vmd .serp .r { width: 640px; margin-bottom: 22px; } .vmd .serp .r small { color: #4d5156; font-size: 13px; }
+.vmd .serp .r b { display: block; color: #1a0dab; font-size: 19px; font-weight: 400; margin: 3px 0; } .vmd .serp .r p { color: #4d5156; font-size: 14px; line-height: 1.5; }
+.vmd.tm { background: #0a0a0a; color: #d4d4d4; font: 18px/1.65 ui-monospace, Menlo, monospace; padding: 26px 32px; }
+.vmd.tm .g { color: #ededed; font-weight: 600; } .vmd.tm .d { color: #737373; } .vmd.tm .ok { color: #62c073; }
+.dim .vmd { filter: grayscale(1) brightness(.45); }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pagebar">
+    <div class="brand">HyzeVM <span>· Palco · estados</span></div>
+    <div class="states" id="states"></div>
+    <div class="grow"></div>
+    <button class="themebtn" id="theme"></button>
+  </header>
+  <div class="stagewrap" id="wrap"><div class="scaler" id="scaler"></div></div>
+</div>
+<script>
+"use strict";
+/* ============================================================ dados */
+const MACHINES = [
+  { id: "agente-videos", tpl: "desktop", state: "running", always: true, screen: "yt", cpu: 38, mem: 41, disk: 15, memT: "1,6 de 3,8 GB", diskT: "4,6 de 31 GB", up: "3 h 12 min", task: "Publicando vídeo no YouTube", last: "Clicou em “Próximo”", ago: "há 12 s" },
+  { id: "agente-pesquisa", tpl: "desktop", state: "running", always: false, screen: "serp", cpu: 12, mem: 28, disk: 9, memT: "1,1 de 3,8 GB", diskT: "2,8 de 31 GB", up: "48 min", task: "Pesquisando tendências", last: "Abriu 3 resultados", ago: "há 40 s" },
+  { id: "build-ci", tpl: "base", state: "running", always: false, screen: "term", cpu: 64, mem: 52, disk: 22, memT: "2,0 de 3,8 GB", diskT: "6,9 de 31 GB", up: "1 h 05 min", task: "Rodando os testes", last: "Rodou npm test", ago: "há 5 s" },
+  { id: "edicao", tpl: "desktop", state: "paused", always: false, screen: "yt", cpu: 0, mem: 0, disk: 31, memT: "—", diskT: "9,6 de 31 GB", up: "—", task: "Pausada há 2 h", last: "Pausada por ociosidade", ago: "há 2 h" },
+];
+const TPL = { minimal: "Terminal", base: "Desenvolvimento", desktop: "Com tela" };
+const ACT = [
+  { k: "ask", ic: "hand", t: "agora", text: "Pediu ajuda", sub: "CAPTCHA no login do Instagram", onlyAsk: true },
+  { k: "browser", ic: "cursor", t: "14:02:31", text: "Clicou em “Próximo”", sub: "YouTube Studio", code: "browser click e14" },
+  { k: "upload", ic: "upload", t: "14:00:52", text: "Enviou um arquivo", sub: "video_final_v3.mp4 · 412 MB", code: "browser upload e7 ~/videos/video_final_v3.mp4" },
+  { k: "browser", ic: "globe", t: "13:59:40", text: "Abriu uma página", sub: "studio.youtube.com", code: "browser goto https://studio.youtube.com" },
+  { k: "exec", ic: "term", t: "13:56:18", text: "Renderizou o vídeo", sub: "2 min 41 s", code: "ffmpeg -i bruto.mov -vf scale=1080:-2 video_final_v3.mp4" },
+  { k: "exec", ic: "term", t: "13:48:02", text: "Baixou referências", sub: "3 vídeos", code: "yt-dlp -f mp4 \"ytsearch3:edição rápida\"" },
+  { k: "you", ic: "user", t: "12:51:10", text: "Você devolveu o controle", sub: "depois de 1 min 20 s" },
+];
+
+/* ============================================================ ícones */
+const P = {
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/>',
+  term: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5"/>',
+  code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', updown: '<path d="M8 9.5l4-4 4 4M8 14.5l4 4 4-4"/>', chev: '<path d="M8 10l4 4 4-4"/>', chevr: '<path d="M10 8l4 4-4 4"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  pause: '<path d="M9 6v12M15 6v12"/>', play: '<path d="M8 5.5v13l10.5-6.5L8 5.5z"/>', power: '<path d="M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0"/>',
+  camera: '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6H8l1.2-1.6h5.6L16 6h1.5A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8z"/><circle cx="12" cy="12.4" r="3.4"/>',
+  keys: '<rect x="2.8" y="6" width="18.4" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  sidebar: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M15 4.5v15"/>',
+  hand: '<path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.9-2.6L3.8 14a1.5 1.5 0 0 1 2.4-1.8L8 14"/>',
+  cursor: '<path d="M6 4l12 7-5.3 1.4L10 18 6 4z"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.5 4 5.5 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.5-4-9s1.4-6.5 4-9z"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>', user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>', sort: '<path d="M8 10l4-4 4 4"/>', layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+};
+const ic = (n, s = 16, w = 1.6) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+
+/* ============================================================ tela falsa */
+function vm(m, { cur = null, captcha = false } = {}) {
+  if (m.screen === "term") return `<div class="vmd tm"><div><span class="g">agent@${m.id}</span>:~/app$ npm test</div><div class="d">PASS src/api.test.ts (2,1 s)</div><div class="d">PASS src/worker.test.ts</div><div>Tests: <span class="ok">128 passed</span>, 128 total</div><div><span class="g">agent@${m.id}</span>:~/app$ ▍</div></div>`;
+  const dock = `<div class="dock"><i class="chr"></i><i class="trm"></i><i class="fls"></i></div>`;
+  const c = cur ? `<div class="cur" style="left:${cur.x}px;top:${cur.y}px"><div class="ring" style="border-color:${cur.c}"></div><svg width="28" height="28" viewBox="0 0 24 24"><path d="M5 3l14 8-6.2 1.6L10 19 5 3z" fill="${cur.c}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg><span style="background:${cur.c}">${cur.label}</span></div>` : "";
+  if (m.screen === "serp") return `<div class="vmd"><div class="wall"></div><div class="chrome">
+    <div class="tabsbar"><div class="ctab"><span class="fav" style="background:#4285f4"></span>tendências edição de vídeo</div><div class="ctab off">Notion — Pauta</div></div>
+    <div class="omni"><span style="color:#888">◀ ▶ ⟳</span><div class="u">google.com/search?q=tendências+edição+de+vídeo+2026</div></div>
+    <div class="pg"><div class="serp"><div class="q">tendências edição de vídeo 2026</div>
+      <div class="r"><small>blog.creatorlab.com › tendencias</small><b>As 9 tendências de edição que vão dominar 2026</b><p>Cortes rápidos com legendas dinâmicas, B-roll e formatos verticais longos lideram o crescimento…</p></div>
+      <div class="r"><small>youtube.com › creators</small><b>O que mudou no algoritmo de Shorts</b><p>Retenção nos primeiros 3 segundos continua sendo o principal sinal. Veja os dados do último trimestre…</p></div>
+      <div class="r"><small>reddit.com › r/VideoEditing</small><b>Qual workflow vocês usam pra publicar todo dia?</b><p>Automatizei render + upload e deixo o agente cuidar das miniaturas…</p></div></div>${c}</div></div>${dock}</div>`;
+  const body = captcha
+    ? `<div class="captcha"><div class="cb">Selecione todas as imagens com<b>semáforos</b></div><div class="g9">${"<i></i>".repeat(9)}</div><div class="cf"><span>VERIFICAR</span></div></div>`
+    : `<div class="modal2"><h3>Como montei um computador só para o meu agente</h3><div class="mbody"><div>
+        <div class="fld"><small>Título (obrigatório)</small>Como montei um computador só para o meu agente</div>
+        <div class="fld big"><small>Descrição</small>Neste vídeo mostro o HyzeVM: uma máquina Linux leve que fica ligada 24 h…</div></div>
+        <div><div class="thumb"></div><div style="font-size:13px;color:#555;margin-top:10px">video_final_v3.mp4</div></div></div>
+        <div class="mfoot">Enviando 64%… <div class="prog"><i></i></div><span class="next">Próximo</span></div></div>`;
+  return `<div class="vmd"><div class="wall"></div><div class="chrome">
+    <div class="tabsbar"><div class="ctab ${captcha ? "off" : ""}"><span class="fav"></span>Enviar vídeos — YouTube Studio</div><div class="ctab ${captcha ? "" : "off"}"><span class="fav" style="background:#c13584"></span>Instagram — Entrar</div></div>
+    <div class="omni"><span style="color:#888">◀ ▶ ⟳</span><div class="u">${captcha ? "instagram.com/accounts/login/challenge" : "studio.youtube.com/channel/UCx9…/videos/upload"}</div></div>
+    <div class="pg">${captcha ? "" : '<div class="ytbar"><span class="logo"></span>Studio</div>'}${body}${c}</div></div>${dock}</div>`;
+}
+const sb = (m, o) => `<div class="screenbox">${vm(m, o)}</div>`;
+
+/* ============================================================ estado */
+const S = { theme: "dark", sel: "agente-videos", view: "tela", control: "agent", ask: false, insp: true, menu: null, sheet: null, pal: false, empty: false, kind: "desktop" };
+const PRESETS = {
+  tela: ["Agente trabalhando", { sel: "agente-videos", view: "tela", control: "agent", ask: false, insp: true }],
+  foco: ["Sem inspetor", { sel: "agente-videos", view: "tela", control: "agent", ask: false, insp: false }],
+  ajuda: ["Precisa de você", { sel: "agente-videos", view: "tela", control: "wait", ask: true, insp: true }],
+  voce: ["Você no controle", { sel: "agente-videos", view: "tela", control: "you", ask: false, insp: true }],
+  atividade: ["Atividade", { sel: "agente-videos", view: "atividade", control: "wait", ask: true, insp: true }],
+  console: ["Console", { sel: "build-ci", view: "console", control: "agent", ask: false, insp: false }],
+  ajustes: ["Ajustes", { sel: "agente-videos", view: "ajustes", control: "agent", ask: false }],
+  semtela: ["Sem tela", { sel: "build-ci", view: "tela", control: "agent", ask: false, insp: true }],
+  pausada: ["Pausada", { sel: "edicao", view: "tela", control: "agent", ask: false, insp: true }],
+  menu: ["Menu de máquinas", { sel: "agente-videos", view: "tela", control: "agent", ask: false, insp: true, menu: "switch" }],
+  nova: ["Nova máquina", { sheet: "new" }],
+  criando: ["Criando", { sheet: "creating" }],
+  cmdk: ["⌘K", { pal: true }],
+  vazio: ["Primeira vez", { empty: true }],
+};
+let preset = "tela";
+const RESET = { menu: null, sheet: null, pal: false, empty: false };
+const isV = (m) => m.id === "agente-videos";
+const ctlOf = (m) => (m.state !== "running" ? "idle" : isV(m) ? S.control : "agent");
+const dotOf = (m) => ({ idle: "paused", agent: "running", you: "you", wait: "wait" }[ctlOf(m)]);
+
+/* ============================================================ render */
+function render() {
+  const m = MACHINES.find((x) => x.id === S.sel);
+  let h = `<div class="win ${S.theme === "light" ? "light" : ""}"><div class="lights"><i></i><i></i><i></i></div>`;
+  h += toolbar(m);
+  if (S.empty) h += `<div class="content">${empty()}</div>`;
+  else {
+    if (S.ask && ctlOf(m) === "wait" && S.view !== "ajustes") h += `<div class="banner">${ic("hand", 16)}<div class="g"><b>${m.id} precisa de você:</b> <span>CAPTCHA no login do Instagram. O agente não resolve verificações sozinho.</span></div><button class="push" data-act="dismiss">Depois</button><button class="push default" data-act="take">Assumir controle</button></div>`;
+    const body = S.view === "tela" ? stage(m) : S.view === "atividade" ? table(m) : S.view === "console" ? consoleView(m) : prefs(m);
+    const showInsp = S.insp && (S.view === "tela" || S.view === "atividade");
+    h += `<div class="content">${body}${showInsp ? inspector(m) : ""}</div>`;
+    if (S.view !== "ajustes") h += statusbar(m);
+  }
+  if (S.menu === "switch") h += switchMenu();
+  if (S.sheet) h += sheet();
+  if (S.pal) h += palette();
+  document.getElementById("scaler").innerHTML = h + "</div>";
+  fit();
+}
+
+function toolbar(m) {
+  if (S.empty) return `<div class="toolbar"><span class="title">HyzeVM</span><div class="grow"></div><button class="tbtn" title="Nova máquina (⌘N)" data-act="new">${ic("plus", 17)}</button></div>`;
+  const ctl = ctlOf(m);
+  const views = [["tela", "Tela"], ["atividade", "Atividade"], ["console", "Console"], ["ajustes", "Ajustes"]]
+    .map(([k, l]) => `<button class="${S.view === k ? "on" : ""}" data-view="${k}">${l}${k === "atividade" && S.ask && isV(m) ? '<span class="cnt">1</span>' : ""}</button>`).join("");
+  let right;
+  if (m.state !== "running") right = `<button class="push lg strong" data-act="resume">${ic("play", 12, 2)}Retomar</button>`;
+  else if (m.tpl === "desktop" && S.view === "tela") right = `<button class="tbtn" title="Capturar tela (⌘⇧S)">${ic("camera", 17)}</button><button class="tbtn" title="Digitar texto">${ic("keys", 17)}</button><button class="tbtn" title="Tela cheia (⌃⌘F)">${ic("expand", 16)}</button><span class="vsep"></span><button class="tbtn" title="Pausar a máquina">${ic("pause", 16, 1.9)}</button>
+      ${ctl === "you" ? `<button class="push lg default" data-act="give">Devolver ao agente</button>` : `<button class="push lg strong" data-act="take">${ic("hand", 14)}Assumir controle</button>`}`;
+  else right = `<button class="tbtn" title="Pausar a máquina">${ic("pause", 16, 1.9)}</button>`;
+  return `<div class="toolbar"><button class="title" data-act="switch"><span class="dot ${dotOf(m)}"></span>${m.id}<span class="sub">${TPL[m.tpl]}</span>${ic("updown", 13, 1.8)}</button>
+    <div class="center"><div class="seg">${views}</div></div><div class="grow"></div>${right}
+    ${S.view === "tela" || S.view === "atividade" ? `<span class="vsep"></span><button class="tbtn ${S.insp ? "on" : ""}" title="Inspetor (⌥⌘I)" data-act="insp">${ic("sidebar", 17)}</button>` : ""}</div>`;
+}
+
+function stage(m) {
+  const running = m.state === "running", ctl = ctlOf(m);
+  const cur = { agent: { x: 860, y: 452, c: "#1d1d1f", label: "Agente" }, you: { x: 640, y: 330, c: "#0a84ff", label: "Você" }, wait: { x: 650, y: 430, c: "#a86e0c", label: "Esperando você" } }[ctl] || null;
+  let screen;
+  if (m.screen === "term" && running) {
+    const L = [["p", "git pull && npm ci"], ["d", "added 812 packages in 9s"], ["p", "docker compose up -d"], ["ok", "✔ Container app-db-1   Started"], ["ok", "✔ Container app-api-1  Started"], ["p", "npm test"], ["d", "PASS src/api.test.ts (2,1 s)"], ["d", "PASS src/worker.test.ts (1,4 s)"], ["wn", "1 snapshot obsoleto"], ["ok", "Tests: 128 passed, 128 total · 4,2 s"]];
+    screen = `<div class="term"><div class="lines">${L.map(([c, t], i) => `<div class="ln"><i>${i + 1}</i><span class="${c}">${c === "p" ? '<span style="color:#6b6b6b">$ </span>' : ""}${t}</span></div>`).join("")}</div>
+      <div class="tin"><b>$</b><span style="flex:1">Rodar um comando em ${m.id}</span><span>↵</span></div></div>`;
+  } else screen = sb(m, { cur: running ? cur : null, captcha: isV(m) && (ctl === "wait" || ctl === "you") });
+  const over = !running ? `<div class="cover"><div class="alertbox"><div class="ai">${ic("pause", 22, 2)}</div><b>${m.id} está pausada</b><p>Memória e processos estão guardados em disco. Ao retomar, ela continua de onde parou em menos de um segundo.</p><div class="row"><button class="push">Desligar</button><button class="push default" data-act="resume">Retomar</button></div></div></div>`
+    : ctl === "you" ? `<div class="hud"><span class="dot you"></span>Teclado e mouse estão na máquina<span class="kbd">⌘⎋ devolve</span></div>` : "";
+  const shelf = MACHINES.map((x) => {
+    const needs = S.ask && isV(x);
+    return `<button class="th ${x.id === S.sel ? "sel" : ""}" data-sel="${x.id}"><div class="mini ${x.state === "paused" ? "dim" : ""}">${sb(x)}${needs ? '<span class="flag tag amber">ajuda</span>' : ""}</div><div class="lbl"><span class="dot ${needs ? "wait" : x.state === "running" ? "running" : "paused"}"></span><span>${x.id}</span></div></button>`;
+  }).join("") + `<button class="th add" data-act="new"><div class="mini">${ic("plus", 16)}</div><div class="lbl"><span>Nova máquina…</span></div></button>`;
+  return `<div class="main"><div class="stagebox"><div class="frame ${ctl === "you" ? "you" : ctl === "wait" ? "wait" : ""} ${running ? "" : "dim"}">${screen}${over}</div></div><div class="shelf">${shelf}</div></div>`;
+}
+
+function inspector(m) {
+  const running = m.state === "running";
+  const feed = ACT.filter((e) => (S.ask && isV(m)) || !e.onlyAsk).slice(0, 4).map((e) => `<div class="fi ${e.k === "ask" ? "ask" : ""}">${ic(e.ic, 14)}<div>${e.text}<small>${e.sub || ""}</small></div><time>${e.t === "agora" ? "agora" : e.t.slice(0, 5)}</time></div>`).join("");
+  return `<aside class="insp">
+    <div class="isec now"><h6>Agora</h6><b>${m.task}</b><p>${running ? `${m.last} ${m.ago}` : "Retoma ao usar"}</p></div>
+    <div class="isec"><h6>Uso</h6>${running ? `<div class="usage">
+      <div class="u"><div><span>CPU</span><span class="num">${m.cpu}%</span></div><div class="lvl"><i class="${m.cpu > 60 ? "warn" : ""}" style="width:${m.cpu}%"></i></div></div>
+      <div class="u"><div><span>Memória</span><span class="num">${m.memT}</span></div><div class="lvl"><i style="width:${m.mem}%"></i></div></div>
+      <div class="u"><div><span>Disco</span><span class="num">${m.diskT}</span></div><div class="lvl"><i style="width:${m.disk}%"></i></div></div></div>` : '<div style="color:var(--fg-3);font-size:12px">Sem dados enquanto pausada.</div>'}</div>
+    <div class="isec"><h6>Atividade<button data-view="atividade">Mostrar tudo</button></h6><div class="feed">${feed}</div></div>
+    <div class="isec"><h6>Máquina</h6>
+      <div class="irow"><span>Modelo</span><span>${TPL[m.tpl]}</span></div><div class="irow"><span>Recursos</span><span>4 CPU · 4 GB · 32 GB</span></div>
+      <div class="irow"><span>Ligada há</span><span>${m.up}</span></div><div class="irow"><span>24 horas</span><i class="switch ${m.always ? "on" : ""}"></i></div>
+      <div style="margin-top:8px" class="copyfield">hyzevm ssh ${m.id}<button title="Copiar">${ic("copy", 13)}</button></div></div>
+  </aside>`;
+}
+
+function statusbar(m) {
+  const running = m.state === "running", ctl = ctlOf(m);
+  const who = !running ? `<span class="dot paused"></span><b>Pausada</b> · memória e processos guardados`
+    : ctl === "you" ? `<span class="dot you"></span><b>Você está no controle</b> · o agente aguarda`
+    : ctl === "wait" ? `<span class="dot wait"></span><b>Aguardando você</b> · CAPTCHA no Instagram`
+    : `<span class="dot running"></span><b>Agente no controle</b> · ${m.last.toLowerCase()} ${m.ago}`;
+  const meta = running ? (m.screen === "term" ? `CPU ${m.cpu}%  ·  ${m.memT.split(" ")[0]} GB  ·  ssh 12 ms` : `CPU ${m.cpu}%  ·  ${m.memT.split(" ")[0]} GB  ·  1280×800  ·  12 ms`) : "";
+  return `<div class="statusbar">${who}<span class="grow"></span><span class="m">${meta}</span></div>`;
+}
+
+function table(m) {
+  const rows = ACT.filter((e) => S.ask || !e.onlyAsk).map((e, i) => `<div class="trow ${i === 1 ? "sel" : ""}"><span class="a ${e.k === "ask" ? "ask" : ""}">${ic(e.ic, 14)}<span>${e.text}</span></span><span class="d2">${e.sub || ""}</span><span class="c">${e.code || "—"}</span>
+    <span>${e.k === "ask" ? '<span class="tag amber">Aguardando você</span>' : e.k === "you" ? '<span class="tag">Você</span>' : '<span class="tag green">Concluída</span>'}</span><span class="t">${e.t}</span></div>`).join("");
+  return `<div class="main" style="background:var(--panel)"><div class="table"><div class="thead"><span>Ação ${ic("sort", 11, 2)}</span><span>Detalhe</span><span>Comando</span><span>Estado</span><span style="justify-content:flex-end">Hora</span></div>${rows}</div></div>`;
+}
+
+function consoleView(m) {
+  const L = [["14:02:11", "cmd", "git pull && npm ci"], ["14:02:20", "out", "added 812 packages, audited 813 packages in 9s"], ["14:02:21", "cmd", "docker compose up -d"], ["14:02:24", "ok", "✔ Container app-db-1   Started"], ["14:02:25", "ok", "✔ Container app-api-1  Started"], ["14:02:26", "cmd", "npm test"], ["14:02:29", "out", "PASS  src/api.test.ts (2.1 s)"], ["14:02:30", "out", "PASS  src/worker.test.ts (1.4 s)"], ["14:02:30", "wn", "›  1 snapshot obsolete"], ["14:02:30", "ok", "Tests: 128 passed, 128 total · 4.2 s"]];
+  return `<div class="console"><div class="ctabs"><button class="on"><span class="dot running"></span>Agente</button><button>Você</button><button style="color:#6b6b6b">${ic("plus", 13)}</button></div>
+    <div class="lb">${L.map(([t, c, s]) => `<div class="l ${c}"><time>${t}</time><span>${s}</span></div>`).join("")}</div>
+    <div class="cin"><b>agent@${m.id} ~/app $</b><span style="flex:1"></span><span>↵</span></div></div>`;
+}
+
+function prefs(m) {
+  const row = (l, v, sub) => `<div class="prow"><div class="lb">${l}${sub ? `<small>${sub}</small>` : ""}</div>${v}</div>`;
+  const pop = (t) => `<span class="popup">${t}<span class="ud">${ic("updown", 11, 2.2)}</span></span>`;
+  return `<div class="prefs"><div class="col">
+    <div class="ptitle">Geral</div>
+    <div class="pgroup">${row("Nome", `<span class="field" style="width:220px">${m.id}</span>`)}${row("Modelo", `<span class="v">${TPL[m.tpl]}</span>`)}</div>
+    <div class="pnote">O nome é usado no terminal e pelos agentes (MCP).</div>
+    <div class="ptitle">Comportamento</div>
+    <div class="pgroup">${row("Manter ligada 24 horas", `<i class="switch ${m.always ? "on" : ""}"></i>`, "Sobe com o computador e volta sozinha se cair.")}${row("Pausar quando ociosa", pop(m.always ? "Nunca" : "Após 30 minutos"))}${row("Abrir a tela ao iniciar", `<i class="switch on"></i>`)}</div>
+    <div class="pnote">Pausar guarda memória e processos; a máquina retoma sozinha quando usada.</div>
+    <div class="ptitle">Recursos</div>
+    <div class="pgroup">${row("Processador", pop("4 núcleos"))}${row("Memória", pop("4 GB"))}${row("Disco", `<span style="display:flex;gap:10px;align-items:center"><span class="v">32 GB · 4,6 GB usados</span><button class="push">Aumentar…</button></span>`)}</div>
+    <div class="pnote">Processador e memória valem a partir do próximo boot.</div>
+    <div class="ptitle">Acesso</div>
+    <div class="pgroup">${row("SSH", `<span style="display:flex;gap:8px;align-items:center"><span class="m">hyzevm ssh ${m.id}</span><button class="push">Copiar</button></span>`)}${row("Agentes via MCP", `<i class="switch on"></i>`, "Permite que agentes controlem esta máquina.")}${row("Porta 8000", `<span class="m">127.0.0.1:51234</span>`)}</div>
+    <div class="pnote"><button style="color:var(--accent);font-size:11.5px">Publicar outra porta…</button></div>
+    <div class="danger"><button class="push red">Remover máquina…</button></div>
+  </div></div>`;
+}
+
+function switchMenu() {
+  return `<div class="menu" style="top:44px;left:84px;width:300px">${MACHINES.map((x, i) => `<button class="mi" data-sel="${x.id}"><span class="ck">${x.id === S.sel ? ic("check", 12, 2.2) : ""}</span><span class="mt ${x.state === "paused" ? "dim" : ""}">${sb(x)}</span><span class="grow">${x.id}</span><span class="kbd">⌘${i + 1}</span></button>`).join("")}
+    <hr><button class="mi" data-act="new"><span class="ck"></span><span class="grow">Nova máquina…</span><span class="kbd">⌘N</span></button><button class="mi"><span class="ck"></span><span class="grow">Importar…</span></button></div>`;
+}
+
+function palette() {
+  const o = (icn, t, k, hl) => `<div class="mi ${hl ? "hl" : ""}">${ic(icn, 15)}<span class="grow">${t}</span>${k ? `<span class="kbd">${k}</span>` : ""}</div>`;
+  return `<div class="pal" data-act="close-pal"><div class="box"><div class="q">${ic("search", 20)}<span>assum<i>ir controle</i></span></div>
+    <div class="gr"><small>Ações</small>${o("hand", "Assumir controle de agente-videos", "↵", true)}${o("pause", "Pausar agente-pesquisa")}${o("camera", "Capturar a tela", "⌘⇧S")}
+    <small>Máquinas</small>${o("monitor", "agente-pesquisa", "⌘2")}${o("code", "build-ci", "⌘3")}${o("plus", "Nova máquina…", "⌘N")}</div></div></div>`;
+}
+
+function sheet() {
+  if (S.sheet === "new") {
+    const kinds = [["minimal", "term", "Terminal", "Debian puro", "10 s"], ["base", "code", "Desenvolvimento", "Docker, Node e Python", "20 s"], ["desktop", "monitor", "Com tela", "Navegador e dock para o agente", "20 s"]];
+    return `<div class="sheetwrap" data-act="close-sheet"><div class="sheet"><div class="sb"><h3>Nova máquina</h3>
+      <div class="form"><label>Nome:</label><div><span class="field focus" style="width:240px">agente-2<span class="caret"></span></span></div>
+        <label>Modelo:</label><div class="opts">${kinds.map(([k, i, t, d, s]) => `<button class="opt ${S.kind === k ? "on" : ""}" data-kind="${k}"><span class="radio ${S.kind === k ? "on" : ""}"></span><span class="oi">${ic(i, 15)}</span><span><b>${t}<span class="meta">${s}</span></b><span>${d}</span></span></button>`).join("")}</div>
+        <label>Tamanho:</label><div><span class="popup">Padrão — 4 núcleos, 4 GB<span class="ud">${ic("updown", 11, 2.2)}</span></span></div>
+        <label>Disco:</label><div><span class="popup">32 GB<span class="ud">${ic("updown", 11, 2.2)}</span></span></div>
+        <label></label><div style="display:flex;gap:8px;align-items:flex-start"><span class="check" style="margin-top:2px">${ic("check", 10, 3)}</span><div>Manter ligada 24 horas<div style="color:var(--fg-2);font-size:11.5px">Sobe com o computador e volta sozinha se cair.</div></div></div></div></div>
+      <div class="sf"><span class="help">?</span><span class="grow"></span><button class="push lg" data-act="close-sheet-btn" style="min-width:84px">Cancelar</button><button class="push lg default" data-act="create" style="min-width:84px">Criar</button></div></div></div>`;
+  }
+  return `<div class="sheetwrap"><div class="sheet" style="width:440px"><div class="sb"><h3 style="margin-bottom:4px">Criando “agente-2”…</h3>
+    <div style="color:var(--fg-2);font-size:12px">Subindo o sistema · 8 s</div><div class="progress"><i></i></div>
+    <span class="disclose">${ic("chev", 12, 2)}Detalhes</span><div class="log">[  0.4] disco preparado<br>[  1.1] máquina ligada<br>[  7.9] cloud-init: Started <b>ssh.service</b><br>[  8.0] hyze-session: dock pronto · Chromium 155</div></div>
+    <div class="sf"><span class="grow"></span><button class="push lg" data-act="close-sheet-btn" style="min-width:84px">Ocultar</button></div></div></div>`;
+}
+
+function empty() {
+  const q = (k, t, d, prev) => `<button class="qt" data-act="new" data-kind="${k}"><div class="pv">${prev}</div><b>${t}</b><span>${d}</span></button>`;
+  return `<div class="empty"><div class="wrap"><div class="glyph">${ic("monitor", 28, 1.4)}</div><h2>Nenhuma máquina</h2><p>Crie um computador Linux para o seu agente. Fica pronto em segundos.</p>
+    <button class="push lg default" data-act="new">Nova máquina…</button>
+    <div class="or">ou comece por um modelo</div>
+    <div class="quick">${q("minimal", "Terminal", "Debian puro · 10 s", sb({ screen: "term", id: "agente" }))}${q("base", "Desenvolvimento", "Docker, Node, Python", `<div style="position:absolute;inset:0;background:#0a0a0a;color:#d4d4d4;font:10.5px/1.7 var(--mono);padding:9px">$ docker ps<br><span style="color:#6b6b6b">api · db · worker</span><br>$ node -v</div>`)}${q("desktop", "Com tela", "Navegador e dock", sb(MACHINES[1]))}</div></div></div>`;
+}
+
+/* ============================================================ página */
+function fit() {
+  const w = document.getElementById("wrap");
+  const s = Math.min((w.clientWidth - 40) / 1280, (w.clientHeight - 40) / 800, 1.25);
+  document.getElementById("scaler").style.transform = `translate(-50%, -50%) scale(${s})`;
+}
+function drawStates() {
+  document.getElementById("states").innerHTML = Object.entries(PRESETS).map(([k, [l]]) => `<button class="${k === preset ? "on" : ""}" data-p="${k}">${l}</button>`).join("");
+  document.getElementById("theme").textContent = S.theme === "dark" ? "Ver claro" : "Ver escuro";
+}
+function applyPreset(k) { preset = k; Object.assign(S, RESET, PRESETS[k][1]); drawStates(); render(); }
+addEventListener("resize", fit);
+document.getElementById("states").onclick = (e) => { const b = e.target.closest("[data-p]"); if (b) applyPreset(b.dataset.p); };
+document.getElementById("theme").onclick = () => { S.theme = S.theme === "dark" ? "light" : "dark"; drawStates(); render(); };
+document.getElementById("scaler").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act],[data-sel],[data-view],[data-kind]");
+  if (!t) { if (S.menu) { S.menu = null; render(); } return; }
+  const d = t.dataset;
+  if (d.sel) { S.sel = d.sel; S.menu = null; }
+  if (d.view) S.view = d.view; if (d.kind) S.kind = d.kind;
+  switch (d.act) {
+    case "switch": S.menu = S.menu ? null : "switch"; break;
+    case "insp": S.insp = !S.insp; break;
+    case "take": S.control = "you"; S.ask = false; S.view = "tela"; break;
+    case "give": S.control = "agent"; break;
+    case "dismiss": S.ask = false; S.control = "agent"; break;
+    case "resume": MACHINES.find((x) => x.id === S.sel).state = "running"; break;
+    case "new": S.sheet = "new"; S.menu = null; S.empty = false; S.pal = false; break;
+    case "create": S.sheet = "creating"; setTimeout(() => { if (S.sheet === "creating") { S.sheet = null; render(); } }, 2600); break;
+    case "close-sheet": if (e.target === t) S.sheet = null; break;
+    case "close-sheet-btn": S.sheet = null; break;
+    case "close-pal": if (e.target === t) S.pal = false; break;
+  }
+  render();
+});
+addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); S.pal = !S.pal; render(); }
+  if (e.key === "Escape") { S.pal = false; S.sheet = null; S.menu = null; render(); }
+});
+drawStates(); render();
+</script>
+</body>
+</html>

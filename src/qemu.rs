@@ -1,0 +1,237 @@
+//! Motor: QEMU com aceleração nativa (HVF no macOS, KVM no Linux, WHPX no Windows).
+use crate::store::Machine;
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+const SUSPEND_TAG: &str = "hyzevm-suspend";
+
+fn arch() -> &'static str { if std::env::consts::ARCH == "aarch64" { "aarch64" } else { "x86_64" } }
+
+pub fn accel() -> &'static str {
+    match std::env::consts::OS { "macos" => "hvf", "linux" => "kvm", "windows" => "whpx", _ => "tcg" }
+}
+
+/// Procura um binário no PATH e nos locais de instalação comuns.
+fn find_bin(name: &str) -> Result<PathBuf> {
+    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    for d in ["/opt/homebrew/bin", "/usr/local/bin", "C:\\Program Files\\qemu"] { dirs.push(d.into()); }
+    dirs.into_iter().map(|d| d.join(&exe)).find(|p| p.is_file()).with_context(|| {
+        format!("{name} não encontrado — instale o QEMU (macOS: brew install qemu · Linux: apt install qemu-system qemu-utils · Windows: winget install SoftwareFreedomConservancy.QEMU)")
+    })
+}
+
+pub fn qemu_img() -> Result<PathBuf> { find_bin("qemu-img") }
+pub fn qemu_system() -> Result<PathBuf> { find_bin(&format!("qemu-system-{}", arch())) }
+pub fn uefi_check() -> Result<String> {
+    match uefi_firmware()? { Some(p) => Ok(p.display().to_string()), None => Ok("não necessário (x86_64 usa SeaBIOS)".into()) }
+}
+
+/// Firmware UEFI — só o arm64 precisa (x86_64 usa SeaBIOS embutido).
+fn uefi_firmware() -> Result<Option<PathBuf>> {
+    if arch() != "aarch64" { return Ok(None); }
+    let c = ["/opt/homebrew/share/qemu/edk2-aarch64-code.fd", "/usr/local/share/qemu/edk2-aarch64-code.fd",
+        "/usr/share/qemu/edk2-aarch64-code.fd", "/usr/share/AAVMF/AAVMF_CODE.fd",
+        "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd", "C:\\Program Files\\qemu\\share\\edk2-aarch64-code.fd"];
+    c.iter().map(PathBuf::from).find(|p| p.is_file()).map(Some)
+        .context("firmware UEFI arm64 não encontrado (instale qemu-efi-aarch64 / o pacote completo do QEMU)")
+}
+
+/// Disco novo em cima de `backing`. Nunca menor que o virtual size do backing
+/// (um disco menor corta a partição raiz e o guest não boota).
+pub fn create_disk(m: &Machine, backing: &std::path::Path) -> Result<()> {
+    let info = Command::new(qemu_img()?).args(["info", "--output=json"]).arg(backing).output()?;
+    let virt: u64 = serde_json::from_slice::<Value>(&info.stdout).ok()
+        .and_then(|v| v["virtual-size"].as_u64()).unwrap_or(0);
+    let want = (m.disk_gb as u64) << 30;
+    let gb = if virt > want {
+        let g = virt.div_ceil(1 << 30);
+        crate::ui::warn(&format!("disco de {} GB é menor que a imagem ({g} GB) — usando {g} GB", m.disk_gb));
+        g
+    } else { m.disk_gb as u64 };
+    let st = Command::new(qemu_img()?).args(["create", "-f", "qcow2", "-F", "qcow2", "-b"])
+        .arg(backing).arg(m.disk()).arg(format!("{gb}G")).stdout(Stdio::null()).status()?;
+    if !st.success() { bail!("qemu-img create falhou"); }
+    Ok(())
+}
+
+/// A imagem base é qcow2 disfarçada de .img — o backing já é qcow2.
+pub fn is_running(m: &Machine) -> bool {
+    TcpStream::connect_timeout(&format!("127.0.0.1:{}", m.qmp_port).parse().unwrap(), Duration::from_millis(300)).is_ok()
+}
+
+/// Como a máquina ficou de pé: já estava, boot novo, retomada da pausa ao vivo ou do estado em disco.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Started { Already, Fresh, Live, Disk }
+
+fn live_marker(m: &Machine) -> std::path::PathBuf { m.dir().join("paused-live") }
+
+pub fn start(m: &Machine) -> Result<Started> {
+    m.set_intent(true);
+    if is_running(m) {
+        if live_marker(m).exists() {
+            qmp(m, json!({"execute": "cont"}))?;
+            let _ = std::fs::remove_file(live_marker(m));
+            return Ok(Started::Live);
+        }
+        return Ok(Started::Already);
+    }
+    let _ = std::fs::remove_file(live_marker(m)); // sobra de um QEMU que morreu pausado
+    let suspended = m.dir().join("suspended").exists();
+    let mut a: Vec<String> = vec![];
+    let mut push = |s: &[&str]| a.extend(s.iter().map(|x| x.to_string()));
+    let host_cpu = matches!(accel(), "hvf" | "kvm");
+    if arch() == "aarch64" {
+        push(&["-machine", &format!("virt,accel={},highmem=on", accel()), "-cpu", if host_cpu { "host" } else { "max" }]);
+        if let Some(fw) = uefi_firmware()? { push(&["-bios", &fw.to_string_lossy()]); }
+    } else {
+        push(&["-machine", &format!("q35,accel={}", accel()), "-cpu", if host_cpu { "host" } else { "max" }]);
+    }
+    let mut fwd = format!("user,id=net0,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:{}-:22", m.ssh_port);
+    if m.view_port != 0 { fwd += &format!(",hostfwd=tcp:127.0.0.1:{}-:6080", m.view_port); }
+    if m.view_ro_port != 0 { fwd += &format!(",hostfwd=tcp:127.0.0.1:{}-:6081", m.view_ro_port); }
+    for (h, g) in &m.ports { fwd += &format!(",hostfwd=tcp:127.0.0.1:{h}-:{g}"); }
+    push(&["-m", &m.memory_mb.to_string(), "-smp", &m.cpus.to_string()]);
+    push(&["-drive", &format!("file={},if=virtio,format=qcow2,cache=writeback", m.disk().display())]);
+    for (i, v) in m.volumes.iter().enumerate() {
+        let p = crate::store::volumes_dir().join(format!("{v}.qcow2"));
+        push(&["-drive", &format!("file={},if=none,id=vol{i},format=qcow2", p.display()),
+            "-device", &format!("virtio-blk-pci,drive=vol{i},serial=hyzevol{i}")]);
+    }
+    if m.seed_dir().exists() {
+        // NoCloud: pasta FAT virtual com label "cidata" (cross-platform, sem mkisofs).
+        push(&["-blockdev", &format!("driver=vvfat,node-name=seed,dir={},label=cidata,rw=off,read-only=on", m.seed_dir().display()),
+            "-device", "virtio-blk-pci,drive=seed"]);
+    }
+    push(&["-nic", &fwd, "-device", "virtio-rng-pci", "-device", "virtio-balloon-pci,free-page-reporting=on", "-display", "none",
+        "-serial", &format!("file:{}", m.serial_log().display()),
+        "-qmp", &format!("tcp:127.0.0.1:{},server,nowait", m.qmp_port)]);
+    if suspended { push(&["-loadvm", SUSPEND_TAG]); }
+
+    let mut cmd = Command::new(find_bin(&format!("qemu-system-{}", arch()))?);
+    // stderr vai para qemu.log na pasta da máquina (diagnóstico de falha de boot).
+    let errlog = std::fs::File::create(m.dir().join("qemu.log"))?;
+    cmd.args(&a).stdin(Stdio::null()).stdout(Stdio::null()).stderr(errlog);
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
+    #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x00000008 | 0x00000200); }
+    cmd.spawn().context("falha ao iniciar o QEMU")?;
+
+    let t = Instant::now();
+    while !is_running(m) {
+        if t.elapsed() > Duration::from_secs(20) { bail!("QEMU não subiu em 20s:\n{}", std::fs::read_to_string(m.dir().join("qemu.log")).unwrap_or_default()); }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    if suspended {
+        let _ = hmp(m, &format!("delvm {SUSPEND_TAG}"));
+        let _ = std::fs::remove_file(m.dir().join("suspended"));
+    }
+    Ok(if suspended { Started::Disk } else { Started::Fresh })
+}
+
+fn qmp(m: &Machine, cmd: Value) -> Result<Value> {
+    // O QMP atende um cliente por vez: logo após outra conexão (ex.: is_running)
+    // o QEMU pode resetar a nova — tenta de novo.
+    let mut last = None;
+    for _ in 0..20 {
+        let attempt = (|| -> Result<(TcpStream, BufReader<TcpStream>, String)> {
+            let s = TcpStream::connect(format!("127.0.0.1:{}", m.qmp_port)).context("máquina parada")?;
+            s.set_read_timeout(Some(Duration::from_secs(300)))?;
+            let mut r = BufReader::new(s.try_clone()?);
+            let mut line = String::new();
+            if r.read_line(&mut line)? == 0 { bail!("QMP fechou a conexão"); } // greeting
+            Ok((s, r, line))
+        })();
+        match attempt { Ok(x) => { last = Some(Ok(x)); break }, Err(e) => { last = Some(Err(e)); std::thread::sleep(Duration::from_millis(150)) } }
+    }
+    let (mut s, mut r, mut line) = last.unwrap()?;
+    writeln!(s, "{}", json!({"execute": "qmp_capabilities"}))?;
+    line.clear(); r.read_line(&mut line)?;
+    writeln!(s, "{cmd}")?;
+    loop {
+        line.clear();
+        if r.read_line(&mut line)? == 0 { return Ok(Value::Null); } // quit fecha a conexão
+        let v: Value = serde_json::from_str(&line)?;
+        if v.get("return").is_some() { return Ok(v["return"].clone()); }
+        if let Some(e) = v.get("error") { bail!("{}", e["desc"].as_str().unwrap_or("erro QMP")); }
+    }
+}
+
+fn hmp(m: &Machine, c: &str) -> Result<String> {
+    let v = qmp(m, json!({"execute": "human-monitor-command", "arguments": {"command-line": c}}))?;
+    Ok(v.as_str().unwrap_or("").to_string())
+}
+
+fn wait_down(m: &Machine, secs: u64) -> bool {
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(secs) {
+        if !is_running(m) { return true; }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
+/// Desligamento limpo via ACPI; `force` mata o QEMU.
+pub fn stop(m: &Machine, force: bool) -> Result<()> {
+    m.set_intent(false);
+    if !is_running(m) { let _ = std::fs::remove_file(live_marker(m)); return Ok(()); }
+    if live_marker(m).exists() { // pausada não atende ACPI: solta antes
+        let _ = qmp(m, json!({"execute": "cont"}));
+        let _ = std::fs::remove_file(live_marker(m));
+    }
+    if !force {
+        qmp(m, json!({"execute": "system_powerdown"}))?;
+        if wait_down(m, 45) { return Ok(()); }
+        bail!("guest não desligou em 45s — use `stop --force`");
+    }
+    let _ = qmp(m, json!({"execute": "quit"}));
+    if wait_down(m, 10) { Ok(()) } else { bail!("QEMU não encerrou") }
+}
+
+/// Pausa ao vivo: congela as CPUs da VM (0% de CPU no host) sem fechar o QEMU.
+/// Retoma na hora e sem salto de relógio — é a pausa padrão (app, MCP, ociosidade).
+pub fn pause(m: &Machine) -> Result<()> {
+    if !is_running(m) { bail!("{} não está em execução", m.name); }
+    qmp(m, json!({"execute": "stop"}))?;
+    std::fs::write(live_marker(m), b"1")?;
+    Ok(())
+}
+
+/// Suspender para disco: grava RAM+CPU no qcow2 e encerra o QEMU (libera a memória do host).
+/// Atenção: após muitas horas, a retomada pode congelar o guest (relógio do HVF); `ops::start`
+/// detecta e reinicia a frio.
+pub fn suspend(m: &Machine) -> Result<()> {
+    m.set_intent(false);
+    if !is_running(m) { bail!("{} não está em execução", m.name); }
+    let out = hmp(m, &format!("savevm {SUSPEND_TAG}"))?;
+    if !out.trim().is_empty() { bail!("savevm falhou: {}", out.trim()); }
+    std::fs::write(m.dir().join("suspended"), b"1")?;
+    let _ = std::fs::remove_file(live_marker(m));
+    let _ = qmp(m, json!({"execute": "quit"}));
+    if !wait_down(m, 15) { bail!("QEMU não encerrou após o savevm"); }
+    Ok(())
+}
+
+/// Reinício a frio (como apertar reset): usado quando um estado salvo não volta a responder.
+pub fn system_reset(m: &Machine) -> Result<()> {
+    qmp(m, json!({"execute": "system_reset"}))?;
+    Ok(())
+}
+
+pub fn state(m: &Machine) -> &'static str {
+    if is_running(m) { if live_marker(m).exists() { "paused" } else { "running" } }
+    else if m.dir().join("suspended").exists() { "paused" } else { "stopped" }
+}
+
+/// Publica/remove porta a quente (aplica já, sem reiniciar).
+pub fn hostfwd(m: &Machine, add: bool, host: u16, guest: u16) -> Result<()> {
+    let c = if add { format!("hostfwd_add net0 tcp:127.0.0.1:{host}-:{guest}") }
+            else { format!("hostfwd_remove net0 tcp:127.0.0.1:{host}") };
+    let out = hmp(m, &c)?;
+    if !out.trim().is_empty() { bail!("{}", out.trim()); }
+    Ok(())
+}

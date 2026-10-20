@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HyzeVM",
+  "version": "0.1.0",
+  "identifier": "sh.hyzevm.app",
+  "build": {
+    "frontendDist": "./ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "HyzeVM",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 20
+        },
+        "backgroundColor": "#0d0d0d"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}

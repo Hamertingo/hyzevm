@@ -1,0 +1,6 @@
+target/
+HyzeVM.app/
+.DS_Store
+.devin/
+*.log
+app/gen/

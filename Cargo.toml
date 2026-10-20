@@ -1,0 +1,35 @@
+[package]
+name = "hyzevm"
+version = "0.1.0"
+edition = "2021"
+description = "A Linux computer of its own for every AI agent — CLI, MCP and desktop app"
+license = "MIT"
+repository = "https://github.com/Hamertingo/hyzevm"
+readme = "README.md"
+keywords = ["vm", "agents", "mcp", "qemu", "sandbox"]
+
+[workspace]
+members = ["app"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+base64 = "0.22"
+getrandom = "0.2"
+clap_complete = "4"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+objc2 = "0.6.5"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+tao = "0.37.1"
+tray-icon = "0.26.1"

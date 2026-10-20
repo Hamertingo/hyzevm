@@ -1,0 +1,2 @@
+noVNC 1.3.0 (core + vendor/pako) — https://github.com/novnc/noVNC
+core/: Mozilla Public License 2.0 (MPL-2.0); vendor/pako: MIT. Copiado sem alterações do pacote Debian `novnc`.
