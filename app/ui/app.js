@@ -495,6 +495,7 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (cmd && e.key.toLowerCase() === "k") { e.preventDefault(); return openK(); }
+  if (S.control && S.view === "focus" && !(cmd && e.key === "Escape") && !(cmd && e.shiftKey && e.key.toLowerCase() === "s")) return; // com o controle, o resto vai para a VM
   if (cmd && e.key.toLowerCase() === "n") { e.preventDefault(); return openK("new"); }
   if (cmd && e.key === "Escape") { e.preventDefault(); return S.control && give(); }
   if (cmd && e.key === "Enter") { e.preventDefault(); return take(); }
@@ -574,6 +575,69 @@ addEventListener("keydown", (e) => {
   if (e.key === "Enter" && CTX.hl >= 0) { const it = CTX.items[CTX.hl]; closeCtx(); it.run(); }
 }, true);
 addEventListener("blur", closeCtx);
+
+/* ================================================================== teclado da VM */
+// O Mac manda ⌘ como "Super" para o Linux e o noVNC trata Caps Lock à parte; aqui o teclado
+// do Mac vira o do Linux: ⌘ = Ctrl, ⌘←/→ = Home/End, ⌥←/→ = palavra, ⌘V/⌘C pela área de transferência real.
+const IS_MAC = window.__FORCE_MAC ?? /Mac/i.test(navigator.platform);
+const XK = { ctrl: [0xffe3, "ControlLeft"], shift: [0xffe1, "ShiftLeft"], home: [0xff50, "Home"], end: [0xff57, "End"],
+  left: [0xff51, "ArrowLeft"], right: [0xff53, "ArrowRight"], up: [0xff52, "ArrowUp"], down: [0xff54, "ArrowDown"], bs: [0xff08, "Backspace"], del: [0xffff, "Delete"] };
+const swallowed = new Set();
+const press = (k) => [[...XK[k], true], [...XK[k], false]];
+const chord = (mods, key) => [...mods.map((m) => [...XK[m], true]), ...(Array.isArray(key[0]) ? key : [[...key, true], [...key, false]]), ...[...mods].reverse().map((m) => [...XK[m], false])];
+function vmSend(seq) { const r = S.screen?.rfb; if (r) for (const [ks, code, down] of seq) r.sendKey(ks, code, down); }
+const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
+async function pullClipboard() {
+  const sc = S.screen; if (!sc) return;
+  try { const n = await invoke("clipboard_from_vm", { name: sc.name }); if (n > 0) toast("Copiado da máquina"); } catch {}
+}
+async function pasteToVm(mods) {
+  const sc = S.screen; if (!sc) return;
+  try { await invoke("clipboard_to_vm", { name: sc.name }); } catch (e) { return toast(esc(e), { err: true }); }
+  vmSend(chord(mods, [0x76, "KeyV"]));
+}
+function vmKeydown(e) {
+  if (!(S.control && S.view === "focus" && S.screen?.rfb) || S.k || $("#ctx").innerHTML) return false;
+  const k = e.key, cmd = IS_MAC ? e.metaKey : e.ctrlKey;
+  // atalhos que continuam sendo do app mesmo com o controle
+  if (IS_MAC && e.metaKey && (k.toLowerCase() === "k" || k === "Escape" || (e.shiftKey && k.toLowerCase() === "s"))) return false;
+  if (k === "CapsLock" || k === "Meta" && IS_MAC) { swallowed.add(e.code); stop(e); return true; } // Caps: o case já vem em e.key; encaminhar inverte duas vezes
+  const mods = e.shiftKey ? ["ctrl", "shift"] : ["ctrl"];
+  const lk = k.length === 1 ? k.toLowerCase() : "";
+  const done = (seq, after) => { swallowed.add(e.code); stop(e); if (!e.repeat) { if (seq) vmSend(seq); after?.(); } return true; };
+  if (cmd && lk === "v") { swallowed.add(e.code); stop(e); if (!e.repeat) pasteToVm(mods); return true; }
+  if (IS_MAC && e.metaKey) {
+    if (lk === "c" || lk === "x") return done(chord(mods, [lk.charCodeAt(0), e.code]), () => setTimeout(pullClipboard, 300));
+    const nav = { ArrowLeft: chord([], XK.home), ArrowRight: chord([], XK.end), ArrowUp: chord(["ctrl"], XK.home), ArrowDown: chord(["ctrl"], XK.end),
+      Backspace: [...chord(["shift"], XK.home), ...press("del")] }[k];
+    if (nav) return done(e.shiftKey && (k === "ArrowLeft" || k === "ArrowRight") ? chord(["shift"], k === "ArrowLeft" ? XK.home : XK.end) : nav);
+    if (lk) return done(chord(mods, [lk.charCodeAt(0), e.code]));
+    return done(null);
+  }
+  if (!IS_MAC && cmd && (lk === "c" || lk === "x")) setTimeout(pullClipboard, 300);       // passa direto; só sincroniza depois
+  if (IS_MAC && e.altKey && !e.metaKey) {
+    const w = { ArrowLeft: chord(["ctrl"], XK.left), ArrowRight: chord(["ctrl"], XK.right), Backspace: chord(["ctrl"], XK.bs) }[k];
+    if (w) return done(w);
+  }
+  return false;
+}
+function vmKeyup(e) { if (swallowed.has(e.code)) { swallowed.delete(e.code); stop(e); return true; } return false; }
+addEventListener("keydown", (e) => { vmKeydown(e); }, true);
+addEventListener("keyup", (e) => { vmKeyup(e); }, true);
+addEventListener("focus", () => { if (S.control) S.screen?.rfb?.focus?.(); });
+
+// Campos do próprio app (⌘K, console): sem menu Editar, ⌘V/⌘C/⌘X/⌘A/⌘Z são tratados aqui, pela área de transferência real.
+addEventListener("keydown", async (e) => {
+  const cmd = IS_MAC ? e.metaKey : false, t = e.target;
+  if (!cmd || !t?.matches?.("input, textarea") || e.altKey) return;
+  const k = e.key.toLowerCase();
+  const sel = () => t.value.slice(t.selectionStart, t.selectionEnd);
+  if (k === "v") { stop(e); try { document.execCommand("insertText", false, await invoke("clipboard_read")); t.dispatchEvent(new Event("input", { bubbles: true })); } catch {} }
+  else if (k === "c") { stop(e); if (sel()) invoke("clipboard_write", { text: sel() }).catch(() => {}); }
+  else if (k === "x") { stop(e); if (sel()) { await invoke("clipboard_write", { text: sel() }).catch(() => {}); document.execCommand("delete"); } }
+  else if (k === "a") { stop(e); t.select(); }
+  else if (k === "z") { stop(e); document.execCommand(e.shiftKey ? "redo" : "undo"); }
+}, true);
 
 /* ================================================================== laços leves */
 // Miniaturas: só desktops ligados, só com a grade visível e o app em primeiro plano.

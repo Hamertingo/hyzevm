@@ -1,6 +1,7 @@
 // Dados de teste: só entra quando a página abre fora do app (preview no navegador).
 if (!window.__TAURI__) {
   window.__MOCK_SCREEN__ = true;
+  window.__FORCE_MAC = true;
   document.addEventListener("DOMContentLoaded", () => document.body.classList.add("web"));
   let machines = [
     { name: "agente-videos", state: "running", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: true, has_screen: true, ports: [], takeover: "CAPTCHA no login do Instagram", auto_suspend_secs: 0, ssh_port: 1, meta: {} },
@@ -45,6 +46,7 @@ if (!window.__TAURI__) {
     set_always_on: async ({ name, on }) => { const m = machines.find((x) => x.name === name); m.always_on = on; },
     takeover_done: async ({ name }) => { machines.find((x) => x.name === name).takeover = null; },
     exec: async ({ command }) => ({ code: 0, stdout: command.startsWith("uname") ? "Linux build-ci 6.1.0-44-arm64 aarch64 GNU/Linux\n" : "ok\n", stderr: "" }),
+    clipboard_read: async () => "texto do mac", clipboard_write: async () => {}, clipboard_to_vm: async () => 11, clipboard_from_vm: async () => 5,
     update_check: async () => ({ version: "0.2.0", current: "0.1.0", notes: "Atualização automática dentro do app\nFuso e idioma das máquinas iguais aos do seu computador\nCorreções no menu de botão direito", page: "https://github.com/Hamertingo/hyzevm/releases", can_install: true }),
     update_install: async () => { await wait(2500); },
     open_url: async () => {},

@@ -91,6 +91,14 @@ create **minimal (Debian puro): ~10 s**, RAM ociosa ~214 MB, retomar de suspend 
 
 `skills/hyzevm/SKILL.md` ensina o agente (Claude Code, Codex…) a usar a máquina: criar/reusar, exec/cp, browser por snapshot, takeover (nunca contornar CAPTCHA/2FA), vault, snapshots, fluxo de postagem. `hyzevm skill install [--dir]` copia para `~/.claude/skills/hyzevm`; `hyzevm skill print` imprime. Embutida no binário (`include_str!`).
 
+## Teclado e área de transferência na VM (controle assumido)
+
+- **Caps Lock não é encaminhado**: o case já vem em `e.key` e x11vnc aplica Shift; encaminhar a tecla invertia duas vezes (letras saíam minúsculas). `screen_ws` desliga um Caps preso na VM ao conectar.
+- **Mac → Linux**: ⌘ vira Ctrl (⌘A/C/X/Z/F/T/L…), ⌘←/→ = Home/End, ⌘↑/↓ = Ctrl+Home/End, ⌘⌫ apaga a linha, ⌥←/→ e ⌥⌫ = por palavra; ⌘ sozinho não é enviado. Com o controle, só ⌘K, ⌘⎋ e ⌘⇧S continuam sendo do app; o resto vai para a VM.
+- **Colar/copiar**: a ponte de seleção do x11vnc não funciona (cut text não vira seleção). ⌘V → `clipboard_to_vm` (arboard no Mac → `xclip -i` na VM via SSH) + Ctrl+V; ⌘C/⌘X → Ctrl+C/X + `clipboard_from_vm` (`xclip -o` → arboard). Testado na VM real: acentos, japonês, aspas e `$HOME` chegam intactos.
+- **App sem menu Editar** (só HyzeVM → sobre/ocultar/sair; macOS), senão ⌘V/⌘C/⌘A são consumidos pelo menu nativo e nunca chegam ao JS. Campos do próprio app (⌘K, console) tratam ⌘V/C/X/A/Z em JS via `clipboard_read/write`.
+- Não verificado na janela real: acentos por tecla morta (⌥E+A) e IME; o noVNC manda o keysym Unicode e o x11vnc remapeia.
+
 ## Atualização e fuso/idioma
 
 - `src/update.rs`: consulta `GET /repos/Hamertingo/hyzevm/releases` (inclui pré-lançamentos), cache de 6 h em `~/.hyzevm/update.json`, baixa o asset, **confere SHA-256 contra `SHA256SUMS.txt` (sem isso não instala)**. CLI: `hyzevm update [--check]` troca o binário; aviso discreto em `ls`/visão geral (cache; se velho, `_checkupdate` em segundo plano). App: pílula `vX.Y.Z` no topo → folha → `update_install` baixa `HyzeVM-macos-arm64.zip`, agenda `swap.sh` (espera o PID sair, troca o .app, `xattr -cr`, `open`) e fecha. Só macOS arm64 troca o app sozinho; nos demais abre a página de download. `HYZEVM_UPDATE_API` aponta para uma release falsa (teste).

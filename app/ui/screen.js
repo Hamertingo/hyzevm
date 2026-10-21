@@ -23,6 +23,7 @@ function mockScreen(host, url, on) {
   return {
     disconnect() { f.remove(); },
     focus() {}, viewOnly: true,
+    sendKey(ks, code, down) { (window.__sent ||= []).push([ks, code, down]); },
     toDataURL: () => "data:image/png;base64,iVBORw0KGgo=",
     get size() { return [1280, 800]; },
   };

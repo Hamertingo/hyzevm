@@ -99,6 +99,9 @@ async fn screen_ws(name: String) -> R<String> {
     blocking(move || {
         let m = Machine::load(&name)?;
         ops::start(&m)?;
+        // O Caps Lock da VM nunca é encaminhado (o case já vem nas teclas); se ficou ligado de uma sessão
+        // antiga, desliga para não inverter as letras.
+        let _ = ssh::exec_capture(&m, "export DISPLAY=:99; xset q 2>/dev/null | grep -q 'Caps Lock: *on' && xdotool key Caps_Lock; true");
         let (token, url, _) = share::create(&m, false, 6 * 3600)?;
         let host = url.split("/s/").next().unwrap_or("http://127.0.0.1").replacen("http://", "ws://", 1);
         Ok(format!("{host}/s/{token}/websockify"))
@@ -149,6 +152,43 @@ async fn machine_thumb(name: String) -> R<String> {
         let m = Machine::load(&name)?;
         if qemu::state(&m) != "running" || m.template != "desktop" { anyhow::bail!("sem tela"); }
         Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(desktop::thumbnail(&m)?)))
+    }).await
+}
+
+/// Área de transferência do computador (o webview não deixa ler/escrever sem permissão).
+#[tauri::command]
+async fn clipboard_read() -> R<String> {
+    blocking(|| Ok(arboard::Clipboard::new()?.get_text().unwrap_or_default())).await
+}
+#[tauri::command]
+async fn clipboard_write(text: String) -> R<()> {
+    blocking(move || { arboard::Clipboard::new()?.set_text(text)?; Ok(()) }).await
+}
+
+/// ⌘V na VM: leva o texto do computador para a área de transferência do Linux (o app em seguida manda Ctrl+V).
+#[tauri::command]
+async fn clipboard_to_vm(name: String) -> R<usize> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    blocking(move || {
+        let text = arboard::Clipboard::new()?.get_text().unwrap_or_default();
+        let m = Machine::load(&name)?;
+        let b64 = STANDARD.encode(text.as_bytes());
+        let sc = format!("export DISPLAY=:99\nprintf %s '{b64}' | base64 -d | xclip -selection clipboard -i >/dev/null 2>&1\nprintf %s '{b64}' | base64 -d | xclip -selection primary -i >/dev/null 2>&1\n");
+        let o = ssh::exec_stdin(&m, &sc)?;
+        if !o.status.success() { anyhow::bail!("{}", String::from_utf8_lossy(&o.stderr).trim()); }
+        Ok(text.chars().count())
+    }).await
+}
+
+/// ⌘C na VM: traz o que o Linux copiou para a área de transferência do computador.
+#[tauri::command]
+async fn clipboard_from_vm(name: String) -> R<usize> {
+    blocking(move || {
+        let m = Machine::load(&name)?;
+        let o = ssh::exec_capture(&m, "DISPLAY=:99 xclip -selection clipboard -o 2>/dev/null")?;
+        let text = String::from_utf8_lossy(&o.stdout).to_string();
+        if o.status.success() && !text.is_empty() { arboard::Clipboard::new()?.set_text(text.clone())?; }
+        Ok(text.chars().count())
     }).await
 }
 
@@ -274,12 +314,27 @@ fn main() {
     }
     tauri::Builder::default()
         .setup(|app| {
+            // Menu enxuto no macOS, sem ⌘V/⌘C/⌘X/⌘A/⌘W/⌘M: esses atalhos precisam chegar ao app e à VM.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+                let h = app.handle();
+                let app_menu = Submenu::with_items(h, "HyzeVM", true, &[
+                    &PredefinedMenuItem::about(h, Some("Sobre o HyzeVM"), None)?,
+                    &PredefinedMenuItem::separator(h)?,
+                    &PredefinedMenuItem::hide(h, Some("Ocultar o HyzeVM"))?,
+                    &PredefinedMenuItem::separator(h)?,
+                    &PredefinedMenuItem::quit(h, Some("Sair do HyzeVM"))?,
+                ])?;
+                app.set_menu(Menu::with_items(h, &[&app_menu])?)?;
+            }
             let _ = desktop::view_url; // mantém o módulo linkado em todas as plataformas
             let _ = app;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, update_check, update_install, open_url, exec, takeover_done, set_always_on, open_terminal, doctor_report
+            platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, update_check, update_install, open_url,
+            clipboard_read, clipboard_write, clipboard_to_vm, clipboard_from_vm, exec, takeover_done, set_always_on, open_terminal, doctor_report
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o app");
