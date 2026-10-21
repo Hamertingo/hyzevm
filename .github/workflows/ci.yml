@@ -15,3 +15,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p hyzevm
       - run: cargo test -p hyzevm
+
+  e2e-linux:
+    # Sobe uma VM de verdade (KVM) e roda tests/e2e.sh: criar, exec, cp, pausar, ponto de restauração, ask, guard, clone.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: QEMU + KVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf openssh-client
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - run: cargo build --release -p hyzevm
+      - run: ./target/release/hyzevm doctor || true
+      - run: HZ=./target/release/hyzevm ./tests/e2e.sh

@@ -6,9 +6,11 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
 fn tools() -> Value {
-    let t = |name: &str, desc: &str, props: Value, req: &[&str]| json!({
-        "name": name, "description": desc,
-        "inputSchema": {"type": "object", "properties": props, "required": req}});
+    let t = |name: &str, desc: &str, mut props: Value, req: &[&str]| {
+        // todo tool do navegador aceita `profile`: um perfil por conta de rede social (logins separados)
+        if name.starts_with("browser_") { props["profile"] = json!({"type": "string", "description": "perfil do navegador (opcional; padrão: default). Use um por conta"}); }
+        json!({"name": name, "description": desc, "inputSchema": {"type": "object", "properties": props, "required": req}})
+    };
     let n = json!({"name": {"type": "string", "description": "nome da máquina"}});
     let xy = json!({"name": {"type":"string"}, "x": {"type":"integer"}, "y": {"type":"integer"}});
     json!([
@@ -58,6 +60,14 @@ fn tools() -> Value {
             json!({"name": {"type":"string"}, "question": {"type":"string"}, "options": {"type":"array", "items": {"type":"string"}}}), &["name", "question"]),
         t("ask_wait", "Espera a resposta do usuário (até timeout_seconds, máx 600). Retorna a resposta ou 'esperando' (chame de novo)",
             json!({"name": {"type":"string"}, "id": {"type":"string"}, "timeout_seconds": {"type":"integer"}}), &["name", "id"]),
+        t("approve_action", "Declare uma ação ANTES de fazer (publish, delete, pay, upload, send…) e espere o sim do usuário. Retorna 'aprovado', 'recusado', 'sem resposta' ou 'ensaio' (modo ensaio: NÃO faça a ação, mostre ao usuário o que faria). Só prossiga em 'aprovado'",
+            json!({"name": {"type":"string"}, "action": {"type":"string"}, "kind": {"type":"string"}, "timeout_seconds": {"type":"integer"}}), &["name", "action"]),
+        t("activity_list", "Últimas ações registradas nesta máquina (comandos, cliques, uploads, perguntas), com horário", json!({"name": {"type":"string"}, "limit": {"type":"integer"}}), &["name"]),
+        t("checkpoint_save", "Tira um ponto de restauração do disco AGORA, com a máquina ligada. Faça isso antes de tarefas grandes ou arriscadas",
+            json!({"name": {"type":"string"}, "point": {"type":"string"}}), &["name", "point"]),
+        t("checkpoint_list", "Lista os pontos de restauração da máquina", n.clone(), &["name"]),
+        t("checkpoint_restore", "Volta o disco da máquina a um ponto (desliga e religa; perde o que veio depois). Use só se a tarefa deu errado e o usuário concordou",
+            json!({"name": {"type":"string"}, "point": {"type":"string"}}), &["name", "point"]),
         t("desktop_view_url", "URL para o usuário assistir/controlar a tela no navegador", n, &["name"]),
     ])
 }
@@ -77,6 +87,7 @@ fn live(a: &Value) -> Result<store::Machine> {
 fn text(t: impl Into<String>) -> Value { json!({"content": [{"type": "text", "text": t.into()}]}) }
 
 fn call(tool: &str, a: &Value) -> Result<Value> {
+    if tool.starts_with("browser_") || tool == "desktop_open" { browser::set_profile(a["profile"].as_str().map(String::from))?; }
     Ok(text(match tool {
         "machine_create" => {
             let mut o = ops::CreateOpts::simple(s(a, "name")?, a["template"].as_str().unwrap_or("minimal"));
@@ -86,7 +97,8 @@ fn call(tool: &str, a: &Value) -> Result<Value> {
         }
         "machine_list" => store::list()?.iter().map(|m| format!("{}\t{}\t{}", m.name, qemu::state(m), m.template)).collect::<Vec<_>>().join("\n"),
         "machine_exec" => {
-            let o = ssh::exec_capture(&live(a)?, s(a, "command")?)?;
+            let m = live(a)?; crate::activity::log(&m, "exec", s(a, "command")?); crate::guard::check_exec(&m, s(a, "command")?)?;
+            let o = ssh::exec_capture(&m, s(a, "command")?)?;
             format!("exit={}\n--- stdout\n{}\n--- stderr\n{}", o.status.code().unwrap_or(-1),
                 String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
         }
@@ -96,6 +108,7 @@ fn call(tool: &str, a: &Value) -> Result<Value> {
             String::from_utf8_lossy(&o.stdout).to_string()
         }
         "machine_write_file" => {
+            crate::activity::log(&live(a)?, "write", s(a, "path")?);
             let p = ssh::sh_quote(s(a, "path")?);
             let sc = format!("mkdir -p \"$(dirname {p})\" && echo {} | base64 -d > {p}\n", ssh::sh_quote(&B64.encode(s(a, "content")?)));
             let o = ssh::exec_stdin(&live(a)?, &sc)?;
@@ -160,12 +173,28 @@ fn call(tool: &str, a: &Value) -> Result<Value> {
             let m = store::Machine::load(s(a, "name")?)?;
             match ask::wait(&m, s(a, "id")?, a["timeout_seconds"].as_u64().unwrap_or(120).min(600))? { Some(r) => format!("resposta: {r}"), None => "esperando".into() }
         }
+        "approve_action" => {
+            use crate::guard::{request, Decision};
+            let m = store::Machine::load(s(a, "name")?)?;
+            match request(&m, a["kind"].as_str().unwrap_or("publish"), s(a, "action")?, a["timeout_seconds"].as_u64().unwrap_or(300).min(600))? {
+                Decision::Approved => "aprovado".into(),
+                Decision::Denied => "recusado: NÃO faça a ação".into(),
+                Decision::Timeout => "sem resposta: NÃO faça a ação (chame de novo para continuar esperando)".into(),
+                Decision::DryRun => "ensaio: NÃO faça a ação; mostre ao usuário o que faria".into(),
+            }
+        }
+        "activity_list" => crate::activity::read(&store::Machine::load(s(a, "name")?)?, a["limit"].as_u64().unwrap_or(30) as usize, 0)
+            .iter().map(|e| format!("{}\t{}\t{}\t{}", crate::ui::clock(e.ts), e.kind, e.actor, e.detail)).collect::<Vec<_>>().join("\n"),
+        "checkpoint_save" => { crate::checkpoint::save(&store::Machine::load(s(a, "name")?)?, s(a, "point")?)?; "ponto criado".into() }
+        "checkpoint_list" => crate::checkpoint::list(&store::Machine::load(s(a, "name")?)?)?.iter().map(|p| format!("{}\t{}", p.name, crate::ui::clock(p.ts))).collect::<Vec<_>>().join("\n"),
+        "checkpoint_restore" => { crate::checkpoint::restore(&store::Machine::load(s(a, "name")?)?, s(a, "point")?)?; "restaurado: a máquina voltou ao ponto e foi religada".into() }
         "desktop_view_url" => desktop::view_url(&live(a)?)?,
         t => return Err(anyhow!("tool desconhecida: {t}")),
     }))
 }
 
 pub fn run() -> Result<i32> {
+    crate::activity::set_actor("mcp");
     let out = std::io::stdout();
     for line in std::io::stdin().lock().lines() {
         let Ok(req) = serde_json::from_str::<Value>(&line?) else { continue };

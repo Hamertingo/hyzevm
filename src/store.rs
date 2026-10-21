@@ -43,6 +43,26 @@ pub struct Machine {
     pub timezone: Option<String>,
     #[serde(default)]
     pub lang: Option<String>,
+    /// Gravação automática da tela: guarda os últimos N segundos de vídeo (0 = desligada).
+    #[serde(default)]
+    pub record_keep_secs: u64,
+    /// Ações que exigem sua aprovação antes (publish, delete, pay, upload, send… ou `*`).
+    #[serde(default)]
+    pub guard: Vec<String>,
+    /// Ensaio: toda ação declarada pára antes de acontecer (o agente mostra o que faria).
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Firewall de saída: a VM só alcança estes sites (via proxy no host). Vazio = rede livre.
+    #[serde(default)]
+    pub net_allow: Vec<String>,
+    /// Limite de banda da VM em KB/s (0 = sem limite; só vale com net_allow).
+    #[serde(default)]
+    pub net_limit_kbps: u64,
+    #[serde(default)]
+    pub net_proxy_port: u16,
+    /// Ponto de restauração automático diário (guarda 7). Desligado por padrão.
+    #[serde(default)]
+    pub auto_checkpoint: bool,
     /// Escreve o vault nesta máquina no boot.
     #[serde(default = "yes")]
     pub vault: bool,
@@ -76,6 +96,8 @@ pub fn images_dir() -> PathBuf { home().join("images") }
 pub fn snapshots_dir() -> PathBuf { home().join("snapshots") }
 pub fn volumes_dir() -> PathBuf { home().join("volumes") }
 pub fn vault_file() -> PathBuf { home().join("vault.json") }
+/// Cofre cifrado (AES-256-GCM); a chave fica no chaveiro do sistema.
+pub fn vault_enc_file() -> PathBuf { home().join("vault.enc") }
 pub fn shares_file() -> PathBuf { home().join("shares.json") }
 pub fn gateway_file() -> PathBuf { home().join("gateway.port") }
 

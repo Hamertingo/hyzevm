@@ -90,6 +90,42 @@ Exit code 2 = no answer yet (the question stays pending; keep waiting with `ask 
 then `ask_wait`. With `--options`, only those answers are accepted. **Do not act until you have the answer;
 if it is "no", stop.** The user answers in the app, or with `hyzevm ask ls` / `hyzevm ask answer <m> <id> <text>`.
 
+### Declare irreversible actions (guard)
+
+The user may set a guard on the machine (`hyzevm guard set <m> --require publish,delete,pay,upload`). Before
+**publishing, deleting, paying, uploading, sending a message** — declare it and wait; proceed only on `aprovado`:
+
+```bash
+hyzevm approve web "Publish video 'Tutorial 03' on Instagram" --kind publish   # exit 0 = go ahead
+```
+
+Exit codes: 0 approved · 3 denied (do NOT do it) · 2 no answer yet (ask again / keep waiting) · 4 **dry-run**
+(the user wants a rehearsal: do everything *except* the final action, then show what you would have done).
+MCP: `approve_action`. Destructive commands (`rm -rf`, `mkfs`, `shutdown`…) and file uploads in the browser are
+blocked by HyzeVM itself until the user approves, even if you forget to ask.
+
+### Safety net for big tasks
+
+Take a restore point before anything risky; the user can roll the whole disk back if it goes wrong:
+
+```bash
+hyzevm checkpoint save web before-bulk-upload     # works while the machine runs
+hyzevm checkpoint ls web
+```
+
+MCP: `checkpoint_save`, `checkpoint_list`. Only run `checkpoint restore` (MCP `checkpoint_restore`) if the
+user agreed: it reboots the machine and discards what came after the point.
+
+## Accounts and profiles
+
+One browser profile per social account keeps logins separate: `hyzevm --profile conta2 browser goto web https://…`
+(MCP: the `profile` argument on any `browser_*` tool). Never log into an account the user did not give you.
+
+## What you did (for the user)
+
+Everything you run is logged with a timestamp: `hyzevm activity web`. The user can also watch the screen recording
+(`hyzevm record auto web on`) and a daily summary (`hyzevm summary web`). Typed text is never logged, only its length.
+
 ## 5. Secrets
 
 The user stores secrets once: `hyzevm vault set NAME`, `vault set-file ~/.config/x --from file`.

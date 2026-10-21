@@ -3,7 +3,7 @@ mod menubar;
 #[cfg(target_os = "macos")]
 mod menubar_view;
 
-use hyzevm::{ask, update, browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
+use hyzevm::{activity, ask, checkpoint, record, update, browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -28,6 +28,11 @@ const HELP: &str = "\
   view · share         Assistir/controlar a tela (link com token)
   takeover …           O agente pede que você assuma (CAPTCHA, 2FA)
   ask …                O agente pergunta e espera sua resposta (ask send|ls|answer)
+  activity <nome>      O que o agente fez (registro com horário)
+  clone · resize       Copiar máquina / mudar CPU e RAM
+  checkpoint …         Pontos de restauração (save, ls, restore)
+  approve · guard      Trava de ações: o agente pede o seu sim antes de publicar/apagar/pagar
+  record …             Gravação da tela (start, stop, ls, get, auto)
 
 \x1b[1mDADOS\x1b[0m
   snapshot · volume · vault · port
@@ -44,6 +49,9 @@ Use \x1b[1mhyzevm <comando> --help\x1b[0m para detalhes.  Exemplo:
 #[derive(Parser)]
 #[command(name = "hyzevm", version, about = "Uma máquina Linux própria para cada agente", help_template = HELP, disable_help_subcommand = true)]
 struct Cli {
+    /// Perfil do navegador da máquina (um por conta; padrão: default). Ex.: hyzevm --profile conta2 browser goto web https://…
+    #[arg(long, global = true)]
+    profile: Option<String>,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -90,7 +98,8 @@ enum Cmd {
     Stop { name: String, #[arg(long)] force: bool },
     /// Pausa ao vivo (instantânea; retoma ao usar)
     Pause { name: String },
-    /// Suspende para disco (libera a RAM do host; retomada mais lenta)
+    /// Suspende para disco (EXPERIMENTAL: pode travar após horas — prefira `pause`)
+    #[command(hide = true)]
     Suspend { name: String },
     /// Apaga a máquina
     #[command(visible_alias = "delete")]
@@ -134,6 +143,34 @@ enum Cmd {
     /// O agente pergunta e espera sua resposta
     #[command(subcommand)]
     Ask(AskCmd),
+    /// O agente declara uma ação e espera o seu sim (exit 0 aprovado · 3 recusado · 2 sem resposta · 4 ensaio)
+    Approve { name: String, action: String, #[arg(long, default_value = "publish")] kind: String, #[arg(long, default_value_t = 600)] wait: u64 },
+    /// Trava de ações da máquina: quais exigem aprovação e modo ensaio
+    #[command(subcommand)]
+    Guard(GuardCmd),
+    /// Gravação da tela (trechos de 5 min, com retenção): start, stop, ls, get, auto
+    #[command(subcommand)]
+    Record(RecCmd),
+    /// Clona uma máquina inteira (disco, navegador logado…) — uma "máquina modelo"
+    Clone { from: String, to: String },
+    /// Muda CPUs e RAM (máquina desligada)
+    Resize { name: String, #[arg(long)] cpus: Option<u32>, #[arg(long)] memory_mb: Option<u32> },
+    /// Pontos de restauração do disco, com a máquina ligada (save, ls, restore, rm)
+    #[command(subcommand)]
+    Checkpoint(Ck),
+    /// Avisos no celular (ntfy): quando o agente precisa de você, a notificação chega no telefone
+    #[command(subcommand)]
+    Notify(NotifyCmd),
+    /// Libera no disco o espaço apagado dentro da máquina (fstrim)
+    Trim { name: String },
+    /// Firewall de saída: a máquina só acessa os sites que você liberar (set, show, off)
+    #[command(subcommand)]
+    Net(NetCmd),
+    /// Resumo do que cada máquina fez (padrão: últimas 24h)
+    Summary { name: Option<String>, #[arg(long, default_value = "24h")] since: String },
+    /// O que o agente fez nesta máquina (comandos, cliques, uploads, perguntas…)
+    Activity { name: String, #[arg(long, default_value_t = 50)] limit: usize, /// só o que veio depois de: 30m, 2h, 1d
+        #[arg(long)] since: Option<String>, #[arg(long)] json: bool },
     /// Abre a tela da máquina no navegador (template desktop)
     View { name: String, #[arg(long)] no_open: bool },
     /// Liga/desliga o modo 24/7 de uma máquina
@@ -170,6 +207,8 @@ enum Cmd {
     Gateway { port: u16 },
     #[command(name = "_watch", hide = true)]
     Watch { name: String },
+    #[command(name = "_netproxy", hide = true)]
+    NetProxy { name: String },
 }
 
 #[derive(Subcommand)]
@@ -188,6 +227,10 @@ enum SkillCmd {
 
 #[derive(Subcommand)]
 enum Snap {
+    /// Salva o snapshot num arquivo (leva para outro computador)
+    Export { snap: String, file: String },
+    /// Traz um arquivo de snapshot para esta biblioteca
+    Import { file: String, #[arg(long = "name")] snap: String },
     Save { name: String, #[arg(long = "name")] snap: String },
     Ls,
     Rm { snap: String },
@@ -265,6 +308,61 @@ enum Tk {
     /// Devolve o controle ao agente (revoga o link)
     Done { name: String },
     Status { name: String },
+}
+
+#[derive(Subcommand)]
+enum Ck {
+    /// Tira um ponto agora (nome opcional; sem nome usa a data)
+    Save { name: String, point: Option<String> },
+    Ls { name: String },
+    /// Volta o disco ao ponto: desliga, restaura e liga (o que veio depois se perde)
+    Restore { name: String, point: String },
+    Rm { name: String, point: String },
+    /// Um ponto automático por dia (guarda os 7 últimos): on | off
+    Auto { name: String, #[arg(value_parser = ["on", "off"])] mode: String },
+}
+
+#[derive(Subcommand)]
+enum NotifyCmd {
+    /// Liga os avisos no celular. Instale o app ntfy e assine o tópico. Use um nome difícil de adivinhar: quem souber o tópico lê os avisos
+    Set { topic: String, #[arg(long, default_value = "https://ntfy.sh")] server: String },
+    /// Manda um aviso de teste
+    Test,
+    Off,
+}
+
+#[derive(Subcommand)]
+enum NetCmd {
+    /// Libera só estes sites (e subdomínios) e limita a banda; vale no próximo boot (reinicie a máquina)
+    Set { name: String, #[arg(long, value_delimiter = ',', required = true)] allow: Vec<String>, /// KB/s (0 = sem limite)
+        #[arg(long, default_value_t = 0)] limit_kbps: u64 },
+    Show { name: String },
+    /// Volta a rede livre (no próximo boot)
+    Off { name: String },
+}
+
+#[derive(Subcommand)]
+enum GuardCmd {
+    /// Define as ações que exigem aprovação (ex.: publish,delete,pay,upload ou *) e liga/desliga o ensaio
+    Set { name: String, #[arg(long, value_delimiter = ',')] require: Vec<String>, #[arg(long)] dry_run: bool },
+    /// Mostra a trava atual
+    Show { name: String },
+    /// Remove a trava (e o ensaio)
+    Off { name: String },
+}
+
+#[derive(Subcommand)]
+enum RecCmd {
+    /// Começa a gravar agora (até parar)
+    Start { name: String },
+    /// Para a gravação
+    Stop { name: String },
+    /// Lista os trechos gravados
+    Ls { name: String },
+    /// Copia um trecho (o número do `ls`) para o seu computador
+    Get { name: String, start: u64, #[arg(short, long)] output: Option<String> },
+    /// Gravação automática e contínua, guardando só os últimos N dias/horas (padrão 3d); `off` desliga
+    Auto { name: String, #[arg(value_parser = ["on", "off"])] mode: String, #[arg(long, default_value = "3d")] keep: String },
 }
 
 #[derive(Subcommand)]
@@ -372,8 +470,13 @@ fn print_machines(ms: &[Machine]) {
     ui::table(&["NOME", "ESTADO", "TEMPLATE", "RECURSOS", ""], &rows);
 }
 
+fn now_tag() -> String { chrono::Local::now().format("%Y%m%d-%H%M%S").to_string() }
+
 fn run() -> Result<i32> {
-    let Some(cmd) = Cli::parse().cmd else { overview()?; return Ok(0); };
+    hyzevm::vault::Vault::migrate();
+    let cli = Cli::parse();
+    browser::set_profile(cli.profile)?;
+    let Some(cmd) = cli.cmd else { overview()?; return Ok(0); };
     match cmd {
         Cmd::Templates => for (n, d) in template::TEMPLATES { println!("{n}\t{d}") },
         Cmd::Create { name, template, snapshot, cpus, memory_mb, disk_gb, ports, meta, timeout, on_timeout,
@@ -427,12 +530,13 @@ fn run() -> Result<i32> {
         Cmd::Pause { name } => { qemu::pause(&Machine::load(&name)?)?; ui::ok(&format!("{name} pausada (retoma na hora ao usar)")); }
         Cmd::Suspend { name } => { qemu::suspend(&Machine::load(&name)?)?; ui::ok(&format!("{name} suspensa em disco (memória e processos guardados)")); }
         Cmd::Rm { name } => { ops::remove(&Machine::load(&name)?)?; ui::ok(&format!("{name} removida")); }
-        Cmd::Exec { name, cmd } => return ssh::exec_inherit(&live(&name)?, Some(&cmd.join(" ")), false),
+        Cmd::Exec { name, cmd } => { let m = live(&name)?; activity::log(&m, "exec", &cmd.join(" ")); hyzevm::guard::check_exec(&m, &cmd.join(" "))?; return ssh::exec_inherit(&m, Some(&cmd.join(" ")), false); }
         Cmd::Ssh { name } => return ssh::exec_inherit(&live(&name)?, None, true),
         Cmd::Cp { from, to } => {
             let name = [&from, &to].iter().find_map(|s| s.split_once(':').map(|x| x.0.to_string()));
             let Some(name) = name else { bail!("um lado precisa ser <máquina>:caminho") };
-            ssh::copy(&live(&name)?, &from, &to)?;
+            let m = live(&name)?; activity::log(&m, "cp", &format!("{from} → {to}"));
+            ssh::copy(&m, &from, &to)?;
         }
         Cmd::Files { name, path } => {
             let p = ssh::sh_quote(path.as_deref().unwrap_or("."));
@@ -455,6 +559,8 @@ fn run() -> Result<i32> {
             println!("{name}: auto-suspend {}", if m.auto_suspend_secs == 0 { "desligado".into() } else { duration });
         }
         Cmd::Snapshot(Snap::Save { name, snap }) => { ops::snapshot_save(&Machine::load(&name)?, &snap)?; ui::ok(&format!("snapshot {snap} salvo")); }
+        Cmd::Snapshot(Snap::Export { snap, file }) => { ops::snapshot_export(&snap, std::path::Path::new(&file))?; ui::ok(&format!("snapshot {snap} salvo em {file}")); }
+        Cmd::Snapshot(Snap::Import { file, snap }) => { ops::snapshot_import(std::path::Path::new(&file), &snap)?; ui::ok(&format!("snapshot {snap} importado — crie com: hyzevm create <nome> --snapshot {snap}")); }
         Cmd::Snapshot(Snap::Ls) => for s in ops::snapshot_list() { println!("{s}") },
         Cmd::Snapshot(Snap::Rm { snap }) => ops::snapshot_remove(&snap)?,
         Cmd::Volume(Vol::Create { name, size_gb }) => { ops::volume_create(&name, size_gb)?; println!("volume {name} ({size_gb} GB) — use `create --volume {name}`"); }
@@ -573,6 +679,110 @@ fn run() -> Result<i32> {
                 None => println!("nenhum"),
             },
         },
+        Cmd::Approve { name, action, kind, wait } => {
+            let m = Machine::load(&name)?;
+            use hyzevm::guard::{request, Decision};
+            return Ok(match request(&m, &kind, &action, wait)? {
+                Decision::Approved => { println!("aprovado"); 0 }
+                Decision::Denied => { println!("recusado"); 3 }
+                Decision::Timeout => { println!("sem resposta"); 2 }
+                Decision::DryRun => { println!("ensaio: NÃO execute; mostre ao usuário o que faria"); 4 }
+            });
+        }
+        Cmd::Guard(g) => match g {
+            GuardCmd::Set { name, require, dry_run } => {
+                let mut m = Machine::load(&name)?;
+                m.guard = require.iter().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+                m.dry_run = dry_run;
+                m.save()?;
+                ui::ok(&format!("{name}: exige aprovação para [{}]{}", m.guard.join(", "), if dry_run { " · modo ensaio" } else { "" }));
+            }
+            GuardCmd::Show { name } => {
+                let m = Machine::load(&name)?;
+                println!("exige aprovação: {}", if m.guard.is_empty() { "nada".into() } else { m.guard.join(", ") });
+                println!("ensaio: {}", if m.dry_run { "ligado" } else { "desligado" });
+            }
+            GuardCmd::Off { name } => { let mut m = Machine::load(&name)?; m.guard.clear(); m.dry_run = false; m.save()?; ui::ok("trava removida"); }
+        },
+        Cmd::Record(c) => match c {
+            RecCmd::Start { name } => { let m = live(&name)?; ui::ok(&if record::start(&m)? { format!("gravando {name}") } else { format!("{name} já está gravando") }); }
+            RecCmd::Stop { name } => { record::stop(&live(&name)?)?; ui::ok("gravação parada"); }
+            RecCmd::Ls { name } => {
+                let m = live(&name)?;
+                let segs = record::list(&m)?;
+                println!("{}", ui::dim(&if record::is_recording(&m) { "● gravando".to_string() } else { "não está gravando".to_string() }));
+                for s in segs { println!("{}\t{}\t{} MB", s.start, ui::clock(s.start), s.bytes / 1_000_000); }
+            }
+            RecCmd::Get { name, start, output } => {
+                let m = live(&name)?;
+                let out = output.unwrap_or_else(|| format!("{name}-{start}.mp4"));
+                ssh::copy(&m, &format!("{name}:.hyze/rec/{start}.mp4"), &out)?;
+                ui::ok(&format!("salvo em {out}"));
+            }
+            RecCmd::Auto { name, mode, keep } => {
+                let mut m = Machine::load(&name)?;
+                m.record_keep_secs = if mode == "on" { store::parse_dur(&keep)?.max(300) } else { 0 };
+                m.save()?;
+                if mode == "on" { ui::ok(&format!("{name} grava sozinha e guarda os últimos {}", ui::humanize_secs(m.record_keep_secs))); watch::ensure(&m)?; }
+                else { ui::ok("gravação automática desligada (use `record stop` para parar a atual)"); }
+            }
+        },
+        Cmd::Notify(n) => match n {
+            NotifyCmd::Set { topic, server } => {
+                if topic.len() < 12 { ui::warn("tópico curto demais — qualquer pessoa que adivinhe o nome lê seus avisos; use algo longo e aleatório"); }
+                takeover::set_phone(Some(takeover::Phone { server, topic }))?; ui::ok("avisos no celular ligados");
+                ui::hint("os avisos (título e texto) passam pelo servidor ntfy; envie um teste: hyzevm notify test");
+            }
+            NotifyCmd::Test => { takeover::notify("HyzeVM", "teste: os avisos estão chegando"); ui::ok("teste enviado"); }
+            NotifyCmd::Off => { takeover::set_phone(None)?; ui::ok("avisos no celular desligados"); }
+        },
+        Cmd::Trim { name } => {
+            let o = ssh::exec_capture(&live(&name)?, "sudo fstrim -av")?;
+            print!("{}", String::from_utf8_lossy(&o.stdout));
+            if !o.status.success() { bail!("{}", String::from_utf8_lossy(&o.stderr).trim()); }
+        }
+        Cmd::Net(n) => match n {
+            NetCmd::Set { name, allow, limit_kbps } => {
+                let mut m = Machine::load(&name)?;
+                m.net_allow = allow.iter().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+                m.net_limit_kbps = limit_kbps;
+                if m.net_proxy_port == 0 { m.net_proxy_port = store::free_port()?; }
+                m.save()?;
+                ui::ok(&format!("{name}: só acessa [{}]{}", m.net_allow.join(", "), if limit_kbps > 0 { format!(" · {limit_kbps} KB/s") } else { String::new() }));
+                ui::hint(&format!("aplica ao ligar: hyzevm stop {name} && hyzevm start {name}"));
+            }
+            NetCmd::Show { name } => {
+                let m = Machine::load(&name)?;
+                if m.net_allow.is_empty() { println!("rede livre"); } else { println!("só acessa: {}\nlimite: {}", m.net_allow.join(", "), if m.net_limit_kbps == 0 { "sem".into() } else { format!("{} KB/s", m.net_limit_kbps) }); }
+            }
+            NetCmd::Off { name } => { let mut m = Machine::load(&name)?; m.net_allow.clear(); m.net_limit_kbps = 0; m.save()?; ui::ok("rede livre (aplica ao ligar)"); }
+        },
+        Cmd::Clone { from, to } => { let m = ops::clone_machine(&Machine::load(&from)?, &to)?; ui::ok(&format!("{} criada a partir de {from}", m.name)); }
+        Cmd::Resize { name, cpus, memory_mb } => { let mut m = Machine::load(&name)?; ops::resize(&mut m, cpus, memory_mb)?; ui::ok(&format!("{name}: {} CPUs · {} MB (vale no próximo boot)", m.cpus, m.memory_mb)); }
+        Cmd::Checkpoint(c) => match c {
+            Ck::Save { name, point } => {
+                let m = Machine::load(&name)?;
+                let p = point.unwrap_or_else(|| format!("manual-{}", now_tag()));
+                checkpoint::save(&m, &p)?; println!("{p}"); ui::ok(&format!("ponto “{p}” criado"));
+            }
+            Ck::Ls { name } => for p in checkpoint::list(&Machine::load(&name)?)? { println!("{}\t{}{}", p.name, ui::clock(p.ts), if p.auto { "\t(automático)" } else { "" }); },
+            Ck::Restore { name, point } => { checkpoint::restore(&Machine::load(&name)?, &point)?; ui::ok(&format!("{name} voltou ao ponto “{point}”")); }
+            Ck::Auto { name, mode } => { let mut m = Machine::load(&name)?; m.auto_checkpoint = mode == "on"; m.save()?; if m.auto_checkpoint { watch::ensure(&m)?; } ui::ok(&format!("ponto automático diário: {mode}")); }
+            Ck::Rm { name, point } => { checkpoint::remove(&Machine::load(&name)?, &point)?; ui::ok("ponto removido"); }
+        },
+        Cmd::Summary { name, since } => {
+            let secs = store::parse_dur(&since)?;
+            let ms = match name { Some(n) => vec![Machine::load(&n)?], None => store::list()? };
+            for m in ms { print!("{}", hyzevm::summary::build(&m, secs)); }
+        }
+        Cmd::Activity { name, limit, since, json } => {
+            let m = Machine::load(&name)?;
+            let from = since.as_deref().map(store::parse_dur).transpose()?.map_or(0, |s| store::now().saturating_sub(s));
+            let ev = activity::read(&m, limit, from);
+            if json { println!("{}", serde_json::to_string(&ev)?); }
+            else if ev.is_empty() { ui::hint("nenhuma ação registrada"); }
+            else { for e in ev { println!("{}  {:<9} {:<8} {}", ui::dim(&ui::clock(e.ts)), e.kind, ui::dim(&e.actor), e.detail); } }
+        }
         Cmd::Ask(c) => match c {
             AskCmd::Send { name, question, options, wait } => {
                 let m = Machine::load(&name)?;
@@ -656,6 +866,7 @@ fn run() -> Result<i32> {
             clap_complete::generate(sh, &mut Cli::command(), "hyzevm", &mut std::io::stdout());
         }
         Cmd::Watch { name } => watch::run(&name)?,
+        Cmd::NetProxy { name } => hyzevm::net::run_proxy(&name)?,
     }
     Ok(0)
 }

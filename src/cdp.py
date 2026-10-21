@@ -2,7 +2,8 @@
 """hyzevm cdp — fala com o Chromium do desktop via DevTools Protocol (só stdlib, só loopback)."""
 import base64, hashlib, json, os, socket, struct, sys, time, urllib.request
 
-PORT = 9222
+import os as _os
+PORT = int(_os.environ.get('HYZE_CDP_PORT', '9222'))
 
 def http(path, method="GET"):
     req = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", method=method)

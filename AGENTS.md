@@ -120,6 +120,19 @@ CI (`app-windows`) gera `HyzeVM-windows-x64-setup.exe` (NSIS, `installer/windows
 
 `src/ask.rs`: `hyzevm ask send <m> "pergunta" [--options a,b] [--wait SEG]` · `ask wait <m> <id>` · `ask ls [m]` · `ask answer <m> <id> <texto>` (exit 2 = sem resposta ainda). MCP: `ask_human` + `ask_wait`. Cada pergunta é `machines/<m>/asks/<id>.json` (resposta gravada no próprio arquivo; com `--options` só aceita as opções). Notifica como o takeover. App: `Dto.asks` + comando `ask_answer`; cartões fixos no canto (`#asks`, `renderAsks` só redesenha quando a lista muda para não perder o texto digitado). **Verificado:** CLI (enviar, opção inválida, esperar, responder, timeout exit 2) e cartões no preview com mock. **Não verificado:** a janela real do Tauri e o MCP em uso. Próximo: trava de ações (`guard`), ver ROADMAP.
 
+## Controle do agente, registro e segurança (v0.1.3)
+
+- `activity.rs`: `machines/<m>/activity.jsonl` (rotaciona em 4 MB). `activity::log(m, kind, detail)` é chamado nas funções da lib (desktop, browser, power, snapshot, ask, takeover, guard…) e em `exec/cp` da CLI/MCP; `set_actor("cli"|"mcp"|"app"|"watch"|"net")` no início de cada processo. **Nunca registre texto digitado** (pode ser senha): só o tamanho. CLI `activity`, MCP `activity_list`.
+- `record.rs`: ffmpeg x11grab no guest, 5 fps, mp4 fragmentado em trechos de 5 min `~/.hyze/rec/<epoch>.mp4` (o nome liga a ação ao vídeo). `record start|stop|ls|get|auto on|off [--keep 3d]`; o vigia (`maintain`, a cada ~5 min) religa a gravação e apaga o que passou da retenção. `clip()` recorta ±segundos sem recodificar (o app toca em base64). Desligada por padrão.
+- `guard.rs`: `approve` (exit 0 aprovado, 3 recusado, 2 sem resposta, 4 ensaio), `guard set --require publish,delete,pay,upload [--dry-run]`. `enforce` barra por fora: `exec` destrutivo (`guard::destructive`) e `browser upload`. Usa o mesmo mecanismo do `ask`.
+- `checkpoint.rs`: snapshots INTERNOS do qcow2 (`ck-<nome>`), criados com a máquina ligada via QMP `blockdev-snapshot-internal-sync` (device `virtio0`); `restore` desliga → `qemu-img snapshot -a` → liga. `checkpoint auto on` = 1/dia (guarda 7). Testado: escrever → ponto → alterar → voltar.
+- `keychain.rs` + `vault.rs`: `vault.enc` (AES-256-GCM); chave no Keychain (`security`), DPAPI (PowerShell, `vault.key`) ou `secret-tool`; sem chaveiro cai para `vault.json` com aviso; `Vault::migrate()` converte o texto antigo. Protege o arquivo em disco, não de um programa rodando como você.
+- `net.rs`: firewall de saída. `net set --allow a.com,b.com [--limit-kbps N]` → o QEMU sobe com `restrict=on` + `guestfwd` 10.0.2.100:3128 → proxy do host (`hyzevm _netproxy`, iniciado ANTES do QEMU em `qemu::start`) que só libera os domínios da lista; a VM recebe `http(s)_proxy`, `/etc/hyze-proxy` (Chromium) e apt. Bloqueios viram `net-blocked` no registro. Vale no próximo boot.
+- `watch.rs`: detector de VM travada (SSH a cada ~1 min, 4 falhas → `system_reset`), manutenção da gravação, alerta de tela parada 3 h, resumo diário (`summary.rs`), ponto automático opcional.
+- `clone`, `resize`, `snapshot export|import`, `trim` (+ `discard=unmap` no disco), `--profile` do navegador (pasta `hyze-chromium-<perfil>`, porta CDP 9300+), `notify set <tópico>` (ntfy; só avisa).
+- App: ⌘J = atividade (Ações/Vídeo/Pontos/Trava); bandeja (`tray.html`, janela "tray" sem borda; fechar a janela principal só esconde; `set_focused`/`take_drop_message` para arrastar arquivos → `~/Uploads`).
+- Testes: `tests/e2e.sh` (CI job `e2e-linux` com KVM). **Não verificado:** bandeja/arrastar na janela real, Windows/Linux de ponta a ponta, medição do limite de banda, travamento real do detector.
+
 ## Roadmap
 
 1. Imagens `base`/`desktop` prontas nos releases do CI (baixar em vez de construir)

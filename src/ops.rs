@@ -1,6 +1,6 @@
 //! Operações compartilhadas entre o CLI e o MCP.
 use crate::{qemu, ssh, store::*, template, vault, watch};
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,6 +38,7 @@ fn template_image_path(tpl: &str) -> PathBuf {
 /// Liga a máquina, marca atividade e garante o watcher (auto-suspend/timeout/vault).
 pub fn start(m: &Machine) -> Result<()> {
     let how = qemu::start(m)?;
+    if !matches!(how, qemu::Started::Already) { crate::activity::log(m, "power", match how { qemu::Started::Live => "retomou", _ => "ligou" }); }
     m.touch();
     watch::ensure(m)?;
     let has_key = m.dir().join("id_ed25519").exists();
@@ -91,7 +92,7 @@ fn ensure_template_image(tpl: &str) -> Result<PathBuf> {
         name: format!("_build-{tpl}"), template: tpl.into(), cpus: 4, memory_mb: 4096, disk_gb: 16,
         ssh_port: free_port()?, qmp_port: free_port()?, ports: vec![], user: "agent".into(), view_port: 0, view_ro_port: 0,
         auto_suspend_secs: 0, expires_at: None, on_timeout: "pause".into(), meta: BTreeMap::new(),
-        volumes: vec![], vault: false, always_on: false, timezone: None, lang: None,
+        volumes: vec![], vault: false, always_on: false, record_keep_secs: 0, auto_checkpoint: false, guard: vec![], dry_run: false, net_allow: vec![], net_limit_kbps: 0, net_proxy_port: 0, timezone: None, lang: None,
     };
     let _ = remove(&m); // sobra de build interrompido
     m.save()?;
@@ -132,7 +133,7 @@ pub fn create(o: CreateOpts) -> Result<Machine> {
         view_port: free_port()?, view_ro_port: free_port()?,
         auto_suspend_secs: if o.always_on { 0 } else { o.auto_suspend.unwrap_or(1800) },
         expires_at: o.timeout.filter(|t| *t > 0).map(|t| now() + t), on_timeout: o.on_timeout,
-        meta: o.meta, volumes: o.volumes, vault: o.vault, always_on: o.always_on,
+        meta: o.meta, volumes: o.volumes, vault: o.vault, always_on: o.always_on, record_keep_secs: 0, auto_checkpoint: false, guard: vec![], dry_run: false, net_allow: vec![], net_limit_kbps: 0, net_proxy_port: 0,
         timezone: host_timezone(), lang: host_lang(),
     };
     m.save()?;
@@ -153,6 +154,7 @@ pub fn remove(m: &Machine) -> Result<()> {
 
 /// Snapshot independente (disco achatado) — a máquina precisa estar parada.
 pub fn snapshot_save(m: &Machine, name: &str) -> Result<()> {
+    crate::activity::log(m, "snapshot", name);
     valid_name(name)?;
     if qemu::state(m) != "stopped" { bail!("pare a máquina antes (`hyzevm stop {}`)", m.name); }
     std::fs::create_dir_all(snapshots_dir())?;
@@ -160,6 +162,49 @@ pub fn snapshot_save(m: &Machine, name: &str) -> Result<()> {
     if dst.exists() { bail!("snapshot “{name}” já existe"); }
     let st = Command::new(qemu::qemu_img()?).args(["convert", "-O", "qcow2"]).arg(m.disk()).arg(&dst).status()?;
     if !st.success() { bail!("qemu-img convert falhou"); }
+    Ok(())
+}
+
+/// Clona uma máquina (disco, navegador logado, arquivos): vira uma "máquina modelo". Desliga a origem um instante.
+pub fn clone_machine(src: &Machine, dst: &str) -> Result<Machine> {
+    valid_name(dst)?;
+    let was_up = qemu::is_running(src);
+    if was_up { qemu::stop(src, false).or_else(|_| qemu::stop(src, true))?; }
+    let tmp = format!("clone-{}-{}", src.name, now());
+    let r = snapshot_save(src, &tmp).and_then(|_| {
+        let mut o = CreateOpts::simple(dst, &src.template);
+        o.snapshot = Some(tmp.clone()); o.cpus = src.cpus; o.memory_mb = src.memory_mb; o.disk_gb = src.disk_gb;
+        o.always_on = false; o.vault = src.vault; o.wait = true;
+        create(o)
+    });
+    let _ = snapshot_remove(&tmp);
+    if was_up { let _ = start(src); }
+    r
+}
+
+/// Muda CPUs/RAM (a máquina precisa estar desligada; vale no próximo boot).
+pub fn resize(m: &mut Machine, cpus: Option<u32>, memory_mb: Option<u32>) -> Result<()> {
+    if qemu::is_running(m) { bail!("desligue a máquina antes (`hyzevm stop {}`)", m.name); }
+    if let Some(c) = cpus { if !(1..=64).contains(&c) { bail!("cpus entre 1 e 64"); } m.cpus = c; }
+    if let Some(r) = memory_mb { if r < 512 { bail!("mínimo 512 MB"); } m.memory_mb = r; }
+    m.save()
+}
+
+pub fn snapshot_export(name: &str, to: &Path) -> Result<()> {
+    valid_name(name)?;
+    let src = snapshots_dir().join(format!("{name}.qcow2"));
+    if !src.exists() { bail!("snapshot “{name}” não existe"); }
+    std::fs::copy(&src, to).map(|_| ()).with_context(|| format!("não consegui gravar {}", to.display()))
+}
+
+pub fn snapshot_import(from: &Path, name: &str) -> Result<()> {
+    valid_name(name)?;
+    std::fs::create_dir_all(snapshots_dir())?;
+    let dst = snapshots_dir().join(format!("{name}.qcow2"));
+    if dst.exists() { bail!("snapshot “{name}” já existe"); }
+    let o = Command::new(qemu::qemu_img()?).args(["info", "--output=json"]).arg(from).output()?;
+    if !o.status.success() { bail!("{} não é uma imagem de disco válida", from.display()); }
+    std::fs::copy(from, &dst)?;
     Ok(())
 }
 

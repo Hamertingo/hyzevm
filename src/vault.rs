@@ -1,5 +1,6 @@
 //! Vault: segredos cadastrados uma vez, escritos em toda máquina no boot.
-//! Guardado em ~/.hyzevm/vault.json (modo 0600). Env → /etc/environment; arquivos → home.
+//! Guardado cifrado em ~/.hyzevm/vault.enc (AES-256-GCM; a chave fica no Keychain/DPAPI/secret-tool).
+//! Sem chaveiro disponível, cai para vault.json (0600) com aviso. Env → /etc/environment; arquivos → home.
 use crate::{ssh, store::*};
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -15,14 +16,32 @@ pub struct Vault {
 
 impl Vault {
     pub fn load() -> Vault {
+        if let Ok(blob) = std::fs::read(vault_enc_file()) {
+            if let Some(v) = crate::keychain::key(false).and_then(|k| crate::keychain::open(&k, &blob)).and_then(|b| serde_json::from_slice(&b).ok()) { return v; }
+            crate::ui::warn("não consegui abrir o cofre cifrado (chave do chaveiro indisponível) — os segredos não serão escritos");
+            return Vault::default();
+        }
+        // vault.json antigo (texto): ainda lê; o próximo `save` migra para o cifrado.
         std::fs::read(vault_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
     pub fn save(&self) -> Result<()> {
         std::fs::create_dir_all(home())?;
+        let json = serde_json::to_vec_pretty(self)?;
+        if let Some(k) = crate::keychain::key(true) {
+            std::fs::write(vault_enc_file(), crate::keychain::seal(&k, &json)?)?;
+            #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(vault_enc_file(), std::fs::Permissions::from_mode(0o600)); }
+            if vault_file().exists() { let _ = std::fs::remove_file(vault_file()); } // migrou: apaga o texto
+            return Ok(());
+        }
+        crate::ui::warn("sem chaveiro do sistema: o cofre fica em texto (vault.json, 0600)");
         let p = vault_file();
-        std::fs::write(&p, serde_json::to_vec_pretty(self)?)?;
+        std::fs::write(&p, json)?;
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?; }
         Ok(())
+    }
+    /// Migra um vault.json em texto para o cofre cifrado (silencioso se já migrado ou sem chaveiro).
+    pub fn migrate() {
+        if vault_file().exists() && !vault_enc_file().exists() { let v = Vault::load(); if v.env.len() + v.files.len() > 0 { let _ = v.save(); } }
     }
     pub fn set_env(&mut self, name: &str, value: &str) -> Result<()> {
         if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {

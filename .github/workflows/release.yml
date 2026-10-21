@@ -66,8 +66,30 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: HyzeVM-windows-x64-setup, path: HyzeVM-windows-x64-setup.exe }
 
+  app-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: dependências do Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf libssl-dev
+      - name: build do app (deb + AppImage)
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          cd app && cargo tauri build --bundles deb,appimage --config '{"bundle":{"active":true,"targets":["deb","appimage"],"icon":["icons/icon.png"],"category":"DeveloperTool","shortDescription":"Uma máquina Linux própria para cada agente"}}'
+      - name: empacota
+        run: |
+          mkdir out
+          cp target/release/bundle/deb/*.deb out/HyzeVM-linux-x64.deb
+          cp target/release/bundle/appimage/*.AppImage out/HyzeVM-linux-x64.AppImage
+      - uses: actions/upload-artifact@v4
+        with: { name: HyzeVM-linux-x64, path: out/* }
+
   publish:
-    needs: [build, app-macos, app-windows]
+    needs: [build, app-macos, app-windows, app-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -85,4 +107,5 @@ jobs:
 
           Install: download the archive for your system, put \`hyzevm\` on your PATH, then \`brew install qemu\` (or your platform's QEMU) and run \`hyzevm doctor\`.
           The macOS app is \`HyzeVM-macos-arm64.zip\` (unzip, drag to Applications). Installed copies offer to update themselves.
+          The Linux app is \`HyzeVM-linux-x64.AppImage\` (chmod +x and run) or the \`.deb\`. Linux is untested end-to-end.
           The Windows app is \`HyzeVM-windows-x64-setup.exe\` (double-click to install; it also bundles the \`hyzevm.exe\` CLI). Windows is untested end-to-end: install QEMU and enable Windows Hypervisor Platform first."

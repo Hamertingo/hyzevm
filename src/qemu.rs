@@ -116,6 +116,7 @@ pub fn start(m: &Machine) -> Result<Started> {
         }
         return Ok(Started::Already);
     }
+    crate::net::ensure_proxy(m)?;
     let _ = std::fs::remove_file(live_marker(m)); // sobra de um QEMU que morreu pausado
     if !m.dir().join("suspended").exists() { ensure_standalone(m)?; } // estado salvo em disco: só depois de um boot limpo
     let suspended = m.dir().join("suspended").exists();
@@ -129,11 +130,13 @@ pub fn start(m: &Machine) -> Result<Started> {
         push(&["-machine", &format!("q35,accel={}", accel()), "-cpu", if host_cpu { "host" } else { "max" }]);
     }
     let mut fwd = format!("user,id=net0,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:{}-:22", m.ssh_port);
+    // Firewall de saída: sem rota para a internet; o único caminho é o proxy do host (10.0.2.100:3128) com lista de sites.
+    if !m.net_allow.is_empty() && m.net_proxy_port != 0 { fwd += &format!(",restrict=on,guestfwd=tcp:10.0.2.100:3128-tcp:127.0.0.1:{}", m.net_proxy_port); }
     if m.view_port != 0 { fwd += &format!(",hostfwd=tcp:127.0.0.1:{}-:6080", m.view_port); }
     if m.view_ro_port != 0 { fwd += &format!(",hostfwd=tcp:127.0.0.1:{}-:6081", m.view_ro_port); }
     for (h, g) in &m.ports { fwd += &format!(",hostfwd=tcp:127.0.0.1:{h}-:{g}"); }
     push(&["-m", &m.memory_mb.to_string(), "-smp", &m.cpus.to_string()]);
-    push(&["-drive", &format!("file={},if=virtio,format=qcow2,cache=writeback", m.disk().display())]);
+    push(&["-drive", &format!("file={},if=virtio,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap", m.disk().display())]);
     for (i, v) in m.volumes.iter().enumerate() {
         let p = crate::store::volumes_dir().join(format!("{v}.qcow2"));
         push(&["-drive", &format!("file={},if=none,id=vol{i},format=qcow2", p.display()),
@@ -169,7 +172,7 @@ pub fn start(m: &Machine) -> Result<Started> {
     Ok(if suspended { Started::Disk } else { Started::Fresh })
 }
 
-fn qmp(m: &Machine, cmd: Value) -> Result<Value> {
+pub fn qmp(m: &Machine, cmd: Value) -> Result<Value> {
     // O QMP atende um cliente por vez: logo após outra conexão (ex.: is_running)
     // o QEMU pode resetar a nova — tenta de novo.
     let mut last = None;
@@ -213,6 +216,7 @@ fn wait_down(m: &Machine, secs: u64) -> bool {
 
 /// Desligamento limpo via ACPI; `force` mata o QEMU.
 pub fn stop(m: &Machine, force: bool) -> Result<()> {
+    crate::activity::log(m, "power", "parou");
     m.set_intent(false);
     if !is_running(m) { let _ = std::fs::remove_file(live_marker(m)); return Ok(()); }
     if live_marker(m).exists() { // pausada não atende ACPI: solta antes
@@ -231,6 +235,7 @@ pub fn stop(m: &Machine, force: bool) -> Result<()> {
 /// Pausa ao vivo: congela as CPUs da VM (0% de CPU no host) sem fechar o QEMU.
 /// Retoma na hora e sem salto de relógio — é a pausa padrão (app, MCP, ociosidade).
 pub fn pause(m: &Machine) -> Result<()> {
+    crate::activity::log(m, "power", "pausou");
     if !is_running(m) { bail!("{} não está em execução", m.name); }
     qmp(m, json!({"execute": "stop"}))?;
     std::fs::write(live_marker(m), b"1")?;

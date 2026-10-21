@@ -1,7 +1,7 @@
 // Sem janela de console no Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use hyzevm::{ask, update, desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
+use hyzevm::{activity, checkpoint, record, ask, update, desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -240,6 +240,150 @@ async fn takeover_done(name: String) -> R<()> { blocking(move || takeover::done(
 #[tauri::command]
 async fn ask_answer(name: String, id: String, text: String) -> R<()> { blocking(move || ask::answer(&Machine::load(&name)?, &id, &text)).await }
 
+#[derive(Serialize)]
+struct EvDto { ts: u64, actor: String, kind: String, detail: String }
+
+/// Últimas ações da máquina (mais nova primeiro).
+#[tauri::command]
+async fn activity_list(name: String, limit: usize) -> R<Vec<EvDto>> {
+    blocking(move || Ok(activity::read(&Machine::load(&name)?, limit.min(500), 0).into_iter().rev()
+        .map(|e| EvDto { ts: e.ts, actor: e.actor, kind: e.kind, detail: e.detail }).collect())).await
+}
+
+#[derive(Serialize)]
+struct RecDto { recording: bool, auto_keep_secs: u64, segments: usize, megabytes: u64 }
+
+#[tauri::command]
+async fn rec_status(name: String) -> R<RecDto> {
+    blocking(move || {
+        let m = Machine::load(&name)?;
+        if qemu::state(&m) != "running" || m.template != "desktop" { return Ok(RecDto { recording: false, auto_keep_secs: m.record_keep_secs, segments: 0, megabytes: 0 }); }
+        let segs = record::list(&m)?;
+        Ok(RecDto { recording: record::is_recording(&m), auto_keep_secs: m.record_keep_secs, megabytes: segs.iter().map(|s| s.bytes).sum::<u64>() / 1_000_000, segments: segs.len() })
+    }).await
+}
+
+#[tauri::command]
+async fn rec_toggle(name: String, on: bool) -> R<()> {
+    blocking(move || { let m = Machine::load(&name)?; if on { record::start(&m)?; } else { record::stop(&m)?; } Ok(()) }).await
+}
+
+/// Gravação automática contínua (guarda 3 dias) ligada/desligada.
+#[tauri::command]
+async fn rec_auto(name: String, on: bool) -> R<()> {
+    blocking(move || {
+        let mut m = Machine::load(&name)?;
+        m.record_keep_secs = if on { 3 * 86400 } else { 0 };
+        m.save()?;
+        if on { hyzevm::watch::ensure(&m)?; if qemu::state(&m) == "running" { record::start(&m)?; } }
+        Ok(())
+    }).await
+}
+
+/// Trecho de vídeo em volta de um instante, em base64 (tocado direto no app).
+#[tauri::command]
+async fn rec_clip(name: String, ts: u64) -> R<String> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    blocking(move || Ok(B64.encode(record::clip(&Machine::load(&name)?, ts, 8, 14)?))).await
+}
+
+#[derive(Serialize)]
+struct CkDto { name: String, ts: u64, auto: bool }
+
+#[tauri::command]
+async fn ck_list(name: String) -> R<Vec<CkDto>> {
+    blocking(move || Ok(checkpoint::list(&Machine::load(&name)?)?.into_iter().rev().map(|p| CkDto { name: p.name, ts: p.ts, auto: p.auto }).collect())).await
+}
+
+#[tauri::command]
+async fn ck_save(name: String, point: String) -> R<()> { blocking(move || checkpoint::save(&Machine::load(&name)?, &point)).await }
+
+#[tauri::command]
+async fn ck_restore(name: String, point: String) -> R<()> { blocking(move || checkpoint::restore(&Machine::load(&name)?, &point)).await }
+
+#[derive(Serialize)]
+struct GuardDto { require: Vec<String>, dry_run: bool }
+
+#[tauri::command]
+async fn guard_get(name: String) -> R<GuardDto> { blocking(move || { let m = Machine::load(&name)?; Ok(GuardDto { require: m.guard, dry_run: m.dry_run }) }).await }
+
+#[tauri::command]
+async fn guard_set(name: String, require: Vec<String>, dry_run: bool) -> R<()> {
+    blocking(move || { let mut m = Machine::load(&name)?; m.guard = require; m.dry_run = dry_run; m.save() }).await
+}
+
+/// Pedido do painel da bandeja para a janela principal abrir uma máquina (a janela principal consulta).
+static OPEN_REQ: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Máquina aberta na janela (para onde vão os arquivos arrastados) e o último resultado do envio.
+static FOCUSED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static DROP_MSG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+async fn set_focused(name: Option<String>) { *FOCUSED.lock().unwrap() = name; }
+
+#[tauri::command]
+async fn take_drop_message() -> Option<String> { DROP_MSG.lock().unwrap().take() }
+
+/// Envia arquivos arrastados para ~/Uploads da máquina aberta (a janela mostra o resultado).
+fn upload_dropped(paths: Vec<std::path::PathBuf>) {
+    let Some(name) = FOCUSED.lock().unwrap().clone() else { return };
+    std::thread::spawn(move || {
+        let msg = (|| -> anyhow::Result<String> {
+            let m = Machine::load(&name)?;
+            if qemu::state(&m) != "running" { anyhow::bail!("{name} não está ligada"); }
+            ssh::exec_capture(&m, "mkdir -p ~/Uploads")?;
+            for p in &paths { ssh::copy(&m, &p.to_string_lossy(), &format!("{name}:Uploads/"))?; }
+            hyzevm::activity::log(&m, "cp", &format!("{} arquivo(s) arrastado(s) → ~/Uploads", paths.len()));
+            Ok(format!("{} arquivo(s) enviado(s) para ~/Uploads em {name}", paths.len()))
+        })().unwrap_or_else(|e| format!("erro: {e}"));
+        *DROP_MSG.lock().unwrap() = Some(msg);
+    });
+}
+
+#[tauri::command]
+async fn take_open_request() -> Option<String> { OPEN_REQ.lock().unwrap().take() }
+
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
+    if let Some(t) = app.get_webview_window("tray") { let _ = t.hide(); }
+}
+
+#[tauri::command]
+async fn show_main(app: tauri::AppHandle, name: Option<String>) -> R<()> {
+    *OPEN_REQ.lock().unwrap() = name;
+    show_main_window(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn quit_app(app: tauri::AppHandle) -> R<()> { app.exit(0); Ok(()) }
+
+/// Pausa todas as máquinas ligadas (ação rápida da bandeja).
+#[tauri::command]
+async fn pause_all() -> R<usize> {
+    blocking(|| { let mut n = 0; for m in store::list()? { if qemu::state(&m) == "running" && qemu::pause(&m).is_ok() { n += 1; } } Ok(n) }).await
+}
+
+/// Ícone da bandeja: com pedidos pendentes (takeover/perguntas) ganha indicador.
+#[tauri::command]
+async fn tray_badge(app: tauri::AppHandle, count: usize) -> R<()> {
+    use tauri::Manager;
+    if let Some(t) = app.tray_by_id("hyze") {
+        #[cfg(target_os = "macos")]
+        { let _ = t.set_title(if count > 0 { Some(count.to_string()) } else { None::<String> }); }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let bytes: &[u8] = if count > 0 { include_bytes!("../icons/tray-win-alert.png") } else { include_bytes!("../icons/tray-win.png") };
+            if let Ok(img) = tauri::image::Image::from_bytes(bytes) { let _ = t.set_icon(Some(img)); }
+        }
+        let _ = t.set_tooltip(Some(if count > 0 { format!("HyzeVM — {count} precisa de você") } else { "HyzeVM".to_string() }));
+    }
+    let _ = app.get_webview_window("tray");
+    Ok(())
+}
+
 #[tauri::command]
 async fn set_always_on(name: String, on: bool) -> R<()> {
     blocking(move || {
@@ -328,9 +472,11 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     match a.get(1).map(|s| s.as_str()) {
         Some("_watch") if a.len() > 2 => { let _ = watch::run(&a[2]); return; }
+        Some("_netproxy") if a.len() > 2 => { let _ = hyzevm::net::run_proxy(&a[2]); return; }
         Some("_gateway") if a.len() > 2 => { if let Ok(p) = a[2].parse() { let _ = share::run_gateway(p); } return; }
         _ => {}
     }
+    hyzevm::activity::set_actor("app");
     tauri::Builder::default()
         .setup(|app| {
             // Menu enxuto no macOS, sem ⌘V/⌘C/⌘X/⌘A/⌘W/⌘M: esses atalhos precisam chegar ao app e à VM.
@@ -347,14 +493,52 @@ fn main() {
                 ])?;
                 app.set_menu(Menu::with_items(h, &[&app_menu])?)?;
             }
+            // Bandeja (Mac: barra de menus; Windows: área de notificação): painel pequeno com as máquinas.
+            {
+                use tauri::{tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, Manager};
+                #[cfg(target_os = "macos")]
+                let (icon, template) = (tauri::image::Image::from_bytes(include_bytes!("../icons/tray-mac.png"))?, true);
+                #[cfg(not(target_os = "macos"))]
+                let (icon, template) = (tauri::image::Image::from_bytes(include_bytes!("../icons/tray-win.png"))?, false);
+                TrayIconBuilder::with_id("hyze").icon(icon).icon_as_template(template).tooltip("HyzeVM")
+                    .on_tray_icon_event(|tray, ev| {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = ev {
+                            let app = tray.app_handle();
+                            let Some(w) = app.get_webview_window("tray") else { return };
+                            if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; }
+                            let scale = w.scale_factor().unwrap_or(1.0);
+                            let (pw, ph) = (340.0 * scale, 460.0 * scale);
+                            let (ix, iy): (f64, f64) = (rect.position.to_physical::<f64>(scale).x, rect.position.to_physical::<f64>(scale).y);
+                            let iw = rect.size.to_physical::<f64>(scale).width;
+                            let ih = rect.size.to_physical::<f64>(scale).height;
+                            let screen_h = w.current_monitor().ok().flatten().map(|m| m.size().height as f64).unwrap_or(1080.0);
+                            let x = (ix + iw / 2.0 - pw / 2.0).max(8.0);
+                            let y = if iy > screen_h / 2.0 { iy - ph - 8.0 } else { iy + ih + 6.0 }; // barra embaixo (Windows) abre para cima
+                            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+                            let _ = w.show(); let _ = w.set_focus();
+                        }
+                    }).build(app)?;
+            }
             let _ = desktop::view_url; // mantém o módulo linkado em todas as plataformas
             let _ = app;
             Ok(())
         })
+        .on_window_event(|w, ev| match (w.label(), ev) {
+            ("main", tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. })) => { upload_dropped(paths.clone()); }
+            ("tray", tauri::WindowEvent::Focused(false)) => { let _ = w.hide(); }
+            ("main", tauri::WindowEvent::CloseRequested { api, .. }) => { api.prevent_close(); let _ = w.hide(); }
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
             platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, update_check, update_install, open_url,
-            clipboard_read, clipboard_write, clipboard_to_vm, clipboard_from_vm, exec, takeover_done, ask_answer, set_always_on, open_terminal, doctor_report
+            clipboard_read, clipboard_write, clipboard_to_vm, clipboard_from_vm, exec, takeover_done, take_open_request, set_focused, take_drop_message, show_main, quit_app, pause_all, tray_badge, ask_answer, activity_list, rec_status, rec_toggle, rec_auto, rec_clip, ck_list, ck_save, ck_restore, guard_get, guard_set, set_always_on, open_terminal, doctor_report
         ])
-        .run(tauri::generate_context!())
-        .expect("erro ao iniciar o app");
+        .build(tauri::generate_context!())
+        .expect("erro ao iniciar o app")
+        .run(|app, ev| {
+            // Clicar no ícone do Dock com a janela escondida (fechada para a bandeja) reabre.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = ev { show_main_window(app); }
+            let _ = (app, ev);
+        });
 }

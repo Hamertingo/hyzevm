@@ -176,6 +176,29 @@ body.web .top { padding-left: 16px; }
 .ask .opts, .ask .reply { display: flex; gap: 6px; flex-wrap: wrap; }
 .ask .reply input { flex: 1; min-width: 0; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line-2); background: transparent; color: inherit; font: inherit; outline: none; }
 
+/* atividade (⌘J) */
+.act { position: absolute; top: 44px; right: 0; bottom: 0; width: 380px; z-index: 48; display: flex; flex-direction: column; background: var(--pal); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-left: 1px solid var(--line-2); font-size: 12.5px; animation: pop .16s ease-out; }
+.act .ah { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+.act .ah .ib { margin-left: auto; width: 24px; height: 24px; }
+.act .mut, .act small.mut, .act i.mut { color: var(--fg-3, #888); font-style: normal; }
+.act nav { display: flex; gap: 2px; padding: 0 10px 8px; border-bottom: 1px solid var(--line-2); }
+.act nav button { flex: 1; height: 26px; border-radius: 13px; color: var(--fg-3, #888); font: inherit; }
+.act nav button.on { background: var(--hover); color: var(--fg); }
+.act .ab { flex: 1; overflow: auto; padding: 8px 10px 14px; }
+.act .r { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 4px; }
+.evs .ev { display: grid; grid-template-columns: 62px 66px 1fr; gap: 6px; align-items: baseline; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
+.evs .ev:hover { background: var(--hover); }
+.ev .t { color: var(--fg-3, #888); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.ev .k { font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: var(--hover); text-align: center; justify-self: start; }
+.ev .k-health, .ev .k-alert, .ev .k-net-blocked { background: color-mix(in srgb, var(--red) 22%, transparent); color: var(--red); }
+.ev .k-ask, .ev .k-approve, .ev .k-takeover { background: color-mix(in srgb, #e5a50a 24%, transparent); }
+.ev .d { overflow-wrap: anywhere; line-height: 1.35; }
+.clip { margin: 4px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.clip video { width: 100%; border-radius: 10px; background: #000; }
+.empty-s { color: var(--fg-3, #888); line-height: 1.45; margin: 12px 4px; }
+.act .reply { display: flex; gap: 6px; margin: 4px 0 8px; }
+.act .reply input { flex: 1; min-width: 0; height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line-2); background: transparent; color: inherit; font: inherit; outline: none; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
 
@@ -210,3 +233,4 @@ body.web .win { max-width: 1280px; max-height: 800px; margin: 20px auto; border-
 .updbox ul { margin: 14px 0 2px 4px; padding-left: 16px; color: var(--fg-2); font-size: 12.5px; line-height: 1.6; }
 .updbox .uf { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .updbox .ubusy { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 18px 0 6px; color: var(--fg-2); font-size: 12.5px; }
+.win:has(.act) #asks { right: 394px; }

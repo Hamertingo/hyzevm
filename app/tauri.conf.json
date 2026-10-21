@@ -25,6 +25,21 @@
           "y": 20
         },
         "backgroundColor": "#0d0d0d"
+      },
+      {
+        "label": "tray",
+        "title": "HyzeVM",
+        "url": "tray.html",
+        "width": 340,
+        "height": 460,
+        "visible": false,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": true,
+        "focus": true,
+        "backgroundColor": "#101010"
       }
     ],
     "security": {

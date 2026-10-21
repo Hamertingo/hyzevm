@@ -79,3 +79,10 @@ pub fn kv(k: &str, v: &str) { println!("  {}  {v}", dim(&format!("{k:<10}"))); }
 pub fn humanize_secs(s: u64) -> String {
     match s { 0..=59 => format!("{s}s"), 60..=3599 => format!("{}m", s / 60), 3600..=86399 => format!("{}h", s / 3600), _ => format!("{}d", s / 86400) }
 }
+
+/// Horário local de um timestamp unix: "14:03:22" (hoje) ou "19/10 14:03" (outros dias).
+pub fn clock(ts: u64) -> String {
+    use chrono::{Local, TimeZone};
+    let Some(t) = Local.timestamp_opt(ts as i64, 0).single() else { return ts.to_string() };
+    if t.date_naive() == Local::now().date_naive() { t.format("%H:%M:%S").to_string() } else { t.format("%d/%m %H:%M").to_string() }
+}

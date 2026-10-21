@@ -58,3 +58,15 @@ direito e painel `⌘I`. Gere com `./scripts/bundle-macos.sh`.
 ## Licença
 
 [MIT](LICENSE)
+
+## Agent control & safety / Controle e segurança
+
+```sh
+hyzevm ask send web "Post it?" --options yes,no --wait 600   # the agent asks, you answer in the app
+hyzevm guard set web --require publish,delete,pay,upload     # the agent must get your OK first (approve)
+hyzevm activity web                                          # everything it did, with timestamps
+hyzevm record auto web on --keep 3d                          # optional screen recording, 3-day retention
+hyzevm checkpoint save web before-bulk-upload                # live restore point; checkpoint restore to go back
+hyzevm net set web --allow instagram.com,facebook.com        # outbound allow-list (applies on next boot)
+hyzevm clone web web-2 · hyzevm summary · hyzevm notify set <topic>
+```

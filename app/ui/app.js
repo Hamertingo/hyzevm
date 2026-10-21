@@ -258,6 +258,94 @@ function paintInfoStats(m) {
   $("#iv-up").textContent = fmtUp(st.uptime_secs);
 }
 
+/* ================================================================== atividade (⌘J) */
+const A = { open: false, tab: "acoes", ev: [], rec: null, cks: [], guard: null, clip: null, clipFor: 0, timer: null, kinds: { all: true } };
+const KIND = { exec: "comando", cp: "arquivo", write: "arquivo", browser: "navegador", desktop: "tela", ask: "pergunta", answer: "resposta", approve: "aprovação",
+  takeover: "ajuda", power: "energia", snapshot: "snapshot", checkpoint: "ponto", record: "vídeo", health: "travou", alert: "alerta", "dry-run": "ensaio", "net-blocked": "bloqueado" };
+const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const ago = (ts) => fmtUp(Math.max(60, Math.floor(Date.now() / 1000 - ts))) + " atrás";
+
+async function loadAct() {
+  const m = cur(); if (!A.open || !m) return;
+  try {
+    if (A.tab === "acoes") A.ev = await invoke("activity_list", { name: m.name, limit: 150 });
+    if (A.tab === "video") A.rec = await invoke("rec_status", { name: m.name });
+    if (A.tab === "pontos") A.cks = await invoke("ck_list", { name: m.name });
+    if (A.tab === "trava") A.guard = await invoke("guard_get", { name: m.name });
+  } catch (e) { toast(esc(e), { err: true }); }
+  renderAct();
+}
+function toggleAct(on = !A.open) {
+  A.open = on; clearInterval(A.timer);
+  if (on) { S.info = false; renderInfo(); loadAct(); A.timer = setInterval(() => { if (!A.clip && (A.tab === "acoes" || A.tab === "video")) loadAct(); }, 4000); }
+  renderAct();
+}
+function renderAct() {
+  const box = $("#act"), m = cur();
+  if (!A.open || S.view !== "focus" || !m) { if (!A.open || S.view !== "focus") { box.innerHTML = ""; } return; }
+  const tabs = [["acoes", "Ações"], ["video", "Vídeo"], ["pontos", "Pontos"], ["trava", "Trava"]];
+  let body = "";
+  if (A.tab === "acoes") {
+    const rows = A.ev.length ? A.ev.map((e) => `<div class="ev" data-ts="${e.ts}" title="Ver o momento no vídeo">
+        <span class="t">${hhmm(e.ts)}</span><span class="k k-${esc(e.kind)}">${esc(KIND[e.kind] || e.kind)}</span><span class="d">${esc(e.detail)}</span></div>`).join("")
+      : `<p class="empty-s">Nenhuma ação registrada ainda. Tudo que o agente fizer (comandos, cliques, arquivos, perguntas) aparece aqui.</p>`;
+    body = `${A.clip ? `<div class="clip"><video src="data:video/mp4;base64,${A.clip}" controls autoplay muted></video><button class="pill soft" data-aact="closeclip">Fechar vídeo</button></div>` : ""}<div class="evs">${rows}</div>`;
+  } else if (A.tab === "video") {
+    const r = A.rec;
+    body = !r ? `<p class="empty-s">Carregando…</p>` : !m.has_screen ? `<p class="empty-s">Gravação de tela só existe no template desktop.</p>` : `
+      <div class="r"><span>Gravando agora</span><span>${r.recording ? '<span class="dot running"></span> sim' : "não"}</span></div>
+      <div class="r"><span>${r.recording ? "Parar" : "Gravar agora"}</span><button class="pill ${r.recording ? "soft" : "solid"}" data-aact="rectoggle">${r.recording ? "Parar" : "Gravar"}</button></div>
+      <div class="r"><span>Gravar sempre</span><button class="sw ${r.auto_keep_secs ? "on" : ""}" data-aact="recauto" aria-label="Gravar sempre"></button></div>
+      <div class="r"><span>Guardado</span><span>${r.segments} trechos · ${r.megabytes} MB</span></div>
+      <p class="empty-s">Com “gravar sempre”, a máquina guarda os últimos 3 dias e apaga o resto sozinha. Na aba Ações, clique numa ação para ver o vídeo daquele momento.</p>`;
+  } else if (A.tab === "pontos") {
+    body = `<form class="reply" data-aform="ck"><input placeholder="Nome do ponto (ex.: antes-de-postar)" autocomplete="off"><button class="pill solid">Criar</button></form>
+      <div class="cks">${A.cks.length ? A.cks.map((c) => `<div class="r"><span>${esc(c.name)}${c.auto ? ' <i class="mut">auto</i>' : ""}<br><small class="mut">${ago(c.ts)}</small></span><button class="pill soft" data-aact="ckrestore" data-p="${esc(c.name)}">Voltar</button></div>`).join("") : `<p class="empty-s">Nenhum ponto ainda. Um ponto guarda o disco inteiro agora; se algo der errado, você volta a ele. A máquina cria um por dia sozinha.</p>`}</div>`;
+  } else {
+    const g = A.guard, has = (k) => g?.require.includes(k);
+    body = !g ? `<p class="empty-s">Carregando…</p>` : `<p class="empty-s" style="margin-top:0">O agente precisa do seu sim antes de:</p>
+      ${[["publish", "Publicar"], ["delete", "Apagar"], ["pay", "Pagar"], ["upload", "Enviar arquivos"], ["send", "Enviar mensagens"]].map(([k, l]) => `<div class="r"><span>${l}</span><button class="sw ${has(k) ? "on" : ""}" data-aact="guard" data-k="${k}" aria-label="${l}"></button></div>`).join("")}
+      <div class="r"><span>Modo ensaio<br><small class="mut">pára antes de agir e mostra o que faria</small></span><button class="sw ${g.dry_run ? "on" : ""}" data-aact="dry" aria-label="Modo ensaio"></button></div>
+      <p class="empty-s">Funciona quando o agente usa <b>approve</b> (a skill ensina). Comandos destrutivos e envio de arquivos são barrados mesmo sem o agente pedir.</p>`;
+  }
+  box.innerHTML = `<aside class="act"><div class="ah"><b>${esc(m.name)}</b><span class="mut">atividade</span><button class="ib" data-aact="close" title="Fechar  esc">${ic("x", 14, 1.8)}</button></div>
+    <nav>${tabs.map(([k, l]) => `<button class="${A.tab === k ? "on" : ""}" data-aact="tab" data-k="${k}">${l}</button>`).join("")}</nav><div class="ab">${body}</div></aside>`;
+}
+$("#act").addEventListener("click", async (e) => {
+  const m = cur(); if (!m) return;
+  const ev = e.target.closest(".ev");
+  if (ev) {
+    toast("Carregando o vídeo…", { sticky: true });
+    try { A.clip = await invoke("rec_clip", { name: m.name, ts: +ev.dataset.ts }); A.clipFor = +ev.dataset.ts; toast("Vídeo do momento"); }
+    catch (er) { toast("Sem vídeo desse momento — ligue “Gravar sempre” na aba Vídeo", { err: true }); }
+    return renderAct();
+  }
+  const b = e.target.closest("[data-aact]"); if (!b) return;
+  const k = b.dataset.aact;
+  try {
+    if (k === "close") return toggleAct(false);
+    if (k === "tab") { A.tab = b.dataset.k; A.clip = null; return loadAct(); }
+    if (k === "closeclip") { A.clip = null; return renderAct(); }
+    if (k === "rectoggle") { await invoke("rec_toggle", { name: m.name, on: !A.rec.recording }); }
+    if (k === "recauto") { await invoke("rec_auto", { name: m.name, on: !A.rec.auto_keep_secs }); }
+    if (k === "ckrestore") {
+      if (!confirm(`Voltar “${b.dataset.p}”? A máquina reinicia e o que foi feito depois desse ponto se perde.`)) return;
+      toast("Voltando ao ponto…", { sticky: true }); await invoke("ck_restore", { name: m.name, point: b.dataset.p }); toast("Pronto: máquina restaurada"); refresh(true);
+    }
+    if (k === "guard" || k === "dry") {
+      const g = A.guard; let req = [...g.require], dry = g.dry_run;
+      if (k === "dry") dry = !dry; else req = req.includes(b.dataset.k) ? req.filter((x) => x !== b.dataset.k) : [...req, b.dataset.k];
+      await invoke("guard_set", { name: m.name, require: req, dry_run: dry });
+    }
+  } catch (er) { toast(esc(er), { err: true }); }
+  loadAct();
+});
+$("#act").addEventListener("submit", async (e) => {
+  e.preventDefault(); const m = cur(), inp = e.target.querySelector("input"), v = inp.value.trim().replace(/[^A-Za-z0-9_-]+/g, "-"); if (!v || !m) return;
+  try { await invoke("ck_save", { name: m.name, point: v }); toast("Ponto criado"); } catch (er) { toast(esc(er), { err: true }); }
+  loadAct();
+});
+
 /* ================================================================== ⌘K */
 function suggestName() {
   const have = new Set(S.machines.map((m) => m.name));
@@ -294,6 +382,7 @@ function kItems() {
     if (m.state !== "stopped") act("power", `Desligar ${m.name}`, "", () => machineAction(m.name, "stop"));
     act("term", "Abrir no Terminal", "ssh", () => call("open_terminal", { name: m.name }));
     act("info", "Informações", "uso, 24 h, acesso", () => { S.info = true; renderInfo(); }, "⌘I");
+    act("clock", "Atividade, vídeo e pontos", "o que o agente fez, gravação, voltar no tempo", () => toggleAct(true), "⌘J");
     act("clock", m.always_on ? "Desligar o modo 24 h" : "Manter ligada 24 h", "", () => toggleAlways(m));
     act("trash", `Remover ${m.name}…`, "", () => openK("remove", { target: m.name }), "", { danger: true, keep: true });
   }
@@ -382,6 +471,10 @@ document.addEventListener("mousemove", (e) => {
 /* ================================================================== ações */
 async function refresh(force = false) {
   try {
+    const dm = await invoke("take_drop_message").catch(() => null); if (dm) toast(esc(dm), { err: dm.startsWith("erro") });
+    invoke("set_focused", { name: S.view === "focus" ? S.sel : null }).catch(() => {});
+    const req = await invoke("take_open_request").catch(() => null); // painel da bandeja pediu para abrir uma máquina
+    if (req && S.machines.some((m) => m.name === req)) openMachine(req);
     const ms = await invoke("list_machines");
     const sig = JSON.stringify(ms);
     S.machines = ms;
@@ -389,7 +482,7 @@ async function refresh(force = false) {
     if (force || sig !== S.sig) { S.sig = sig; render(); if (S.k?.mode === "main") renderKList(); }
   } catch { /* o app ainda está subindo */ }
 }
-function render() { renderTop(); S.view === "focus" ? renderFocus() : renderGrid(); renderInfo(); renderAsks(); }
+function render() { renderTop(); S.view === "focus" ? renderFocus() : renderGrid(); renderInfo(); renderAsks(); if (A.open && S.view !== "focus") { A.open = false; } renderAct(); }
 
 /* perguntas do agente (ask): cartão fixo; só redesenha quando a lista muda, para não perder o texto digitado */
 let asksSig = "";
@@ -519,10 +612,12 @@ addEventListener("keydown", (e) => {
   if (cmd && e.key.toLowerCase() === "n") { e.preventDefault(); return openK("new"); }
   if (cmd && e.key === "Escape") { e.preventDefault(); return S.control && give(); }
   if (cmd && e.key === "Enter") { e.preventDefault(); return take(); }
+  if (cmd && e.key.toLowerCase() === "j" && S.view === "focus") { e.preventDefault(); return toggleAct(); }
   if (cmd && e.key.toLowerCase() === "i" && S.view === "focus") { e.preventDefault(); S.info = !S.info; return renderInfo(); }
   if (cmd && e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); return capture(); }
   if (cmd && /^[1-9]$/.test(e.key)) { const m = S.machines[+e.key - 1]; if (m) { e.preventDefault(); return openMachine(m.name); } }
   if (e.key === "Escape" && !S.control) {
+    if (A.open) return toggleAct(false);
     if (S.info) { S.info = false; return renderInfo(); }
     if (S.view === "focus" && !e.target.closest?.("form")) return goHome();
   }

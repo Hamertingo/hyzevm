@@ -24,6 +24,7 @@ pub fn send(m: &Machine, question: &str, options: Vec<String>) -> Result<Ask> {
     let t = now();
     let a = Ask { id: format!("{t:x}{:02x}", std::process::id() % 256), question: question.into(), options, asked_at: t, answer: None };
     std::fs::write(dir(m).join(format!("{}.json", a.id)), serde_json::to_vec_pretty(&a)?)?;
+    crate::activity::log(m, "ask", question);
     takeover::notify(&format!("{} pergunta", m.name), question);
     Ok(a)
 }
@@ -46,6 +47,7 @@ pub fn answer(m: &Machine, id: &str, text: &str) -> Result<()> {
     if !a.options.is_empty() && !a.options.iter().any(|o| o.eq_ignore_ascii_case(text)) {
         bail!("resposta inválida — opções: {}", a.options.join(", "));
     }
+    crate::activity::log(m, "answer", &format!("{} → {text}", a.question));
     a.answer = Some(text.to_string());
     std::fs::write(dir(m).join(format!("{id}.json")), serde_json::to_vec_pretty(&a)?)?;
     Ok(())
