@@ -1,7 +1,7 @@
 // Sem janela de console no Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use hyzevm::{update, desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
+use hyzevm::{ask, update, desktop, doctor, ops, qemu, share, ssh, store::{self, Machine}, takeover, ui, watch};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,16 +27,21 @@ struct Dto {
     has_screen: bool,
     ports: Vec<(u16, u16)>,
     takeover: Option<String>,
+    asks: Vec<AskDto>,
     auto_suspend_secs: u64,
     ssh_port: u16,
     meta: BTreeMap<String, String>,
 }
 
+#[derive(Serialize)]
+struct AskDto { id: String, question: String, options: Vec<String> }
+
 fn dto(m: &Machine) -> Dto {
     Dto {
         name: m.name.clone(), state: qemu::state(m), template: m.template.clone(), cpus: m.cpus, memory_mb: m.memory_mb,
         disk_gb: m.disk_gb, always_on: m.always_on, has_screen: m.template == "desktop", ports: m.ports.clone(),
-        takeover: takeover::pending(m).map(|t| t.reason), auto_suspend_secs: m.auto_suspend_secs, ssh_port: m.ssh_port, meta: m.meta.clone(),
+        takeover: takeover::pending(m).map(|t| t.reason),
+        asks: ask::pending(m).into_iter().map(|a| AskDto { id: a.id, question: a.question, options: a.options }).collect(), auto_suspend_secs: m.auto_suspend_secs, ssh_port: m.ssh_port, meta: m.meta.clone(),
     }
 }
 
@@ -233,6 +238,9 @@ async fn exec(name: String, command: String) -> R<ExecOut> {
 async fn takeover_done(name: String) -> R<()> { blocking(move || takeover::done(&Machine::load(&name)?)).await }
 
 #[tauri::command]
+async fn ask_answer(name: String, id: String, text: String) -> R<()> { blocking(move || ask::answer(&Machine::load(&name)?, &id, &text)).await }
+
+#[tauri::command]
 async fn set_always_on(name: String, on: bool) -> R<()> {
     blocking(move || {
         let mut m = Machine::load(&name)?;
@@ -345,7 +353,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             platform, list_machines, machine_action, create_machine, screen_url, screen_ws, machine_stats, set_auto_suspend, desktop_type, save_screenshot, machine_thumb, update_check, update_install, open_url,
-            clipboard_read, clipboard_write, clipboard_to_vm, clipboard_from_vm, exec, takeover_done, set_always_on, open_terminal, doctor_report
+            clipboard_read, clipboard_write, clipboard_to_vm, clipboard_from_vm, exec, takeover_done, ask_answer, set_always_on, open_terminal, doctor_report
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o app");

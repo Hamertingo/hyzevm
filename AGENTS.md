@@ -116,6 +116,10 @@ create **minimal (Debian puro): ~10 s**, RAM ociosa ~214 MB, retomar de suspend 
 
 CI (`app-windows`) gera `HyzeVM-windows-x64-setup.exe` (NSIS, `installer/windows.nsi`, por usuário em `%LOCALAPPDATA%\Programs\HyzeVM`, atalhos no Menu Iniciar/Desktop) com o app (`hyzevm-desktop.exe`) + a CLI (`hyzevm.exe`). NUNCA chamar o app de `hyzevm.exe`/`HyzeVM.exe`: FS case-insensitive (mesma colisão do macOS). `hide_child_consoles` (app/src/main.rs) cria console oculto para ssh/qemu-img filhos não piscarem janelas. **Não verificado:** build e execução no Windows (nada rodou lá); sem auto-update do app no Windows.
 
+## Ask (pergunte ao humano)
+
+`src/ask.rs`: `hyzevm ask send <m> "pergunta" [--options a,b] [--wait SEG]` · `ask wait <m> <id>` · `ask ls [m]` · `ask answer <m> <id> <texto>` (exit 2 = sem resposta ainda). MCP: `ask_human` + `ask_wait`. Cada pergunta é `machines/<m>/asks/<id>.json` (resposta gravada no próprio arquivo; com `--options` só aceita as opções). Notifica como o takeover. App: `Dto.asks` + comando `ask_answer`; cartões fixos no canto (`#asks`, `renderAsks` só redesenha quando a lista muda para não perder o texto digitado). **Verificado:** CLI (enviar, opção inválida, esperar, responder, timeout exit 2) e cartões no preview com mock. **Não verificado:** a janela real do Tauri e o MCP em uso. Próximo: trava de ações (`guard`), ver ROADMAP.
+
 ## Roadmap
 
 1. Imagens `base`/`desktop` prontas nos releases do CI (baixar em vez de construir)

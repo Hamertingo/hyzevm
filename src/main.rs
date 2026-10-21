@@ -3,7 +3,7 @@ mod menubar;
 #[cfg(target_os = "macos")]
 mod menubar_view;
 
-use hyzevm::{update, browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
+use hyzevm::{ask, update, browser, desktop, doctor, mcp, ops, qemu, service, share, ssh, store, takeover, template, ui, vault, watch};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -27,6 +27,7 @@ const HELP: &str = "\
   desktop …            Mouse/teclado/screenshot no desktop
   view · share         Assistir/controlar a tela (link com token)
   takeover …           O agente pede que você assuma (CAPTCHA, 2FA)
+  ask …                O agente pergunta e espera sua resposta (ask send|ls|answer)
 
 \x1b[1mDADOS\x1b[0m
   snapshot · volume · vault · port
@@ -130,6 +131,9 @@ enum Cmd {
     /// O agente pede que você assuma a tela (CAPTCHA, 2FA…)
     #[command(subcommand)]
     Takeover(Tk),
+    /// O agente pergunta e espera sua resposta
+    #[command(subcommand)]
+    Ask(AskCmd),
     /// Abre a tela da máquina no navegador (template desktop)
     View { name: String, #[arg(long)] no_open: bool },
     /// Liga/desliga o modo 24/7 de uma máquina
@@ -261,6 +265,18 @@ enum Tk {
     /// Devolve o controle ao agente (revoga o link)
     Done { name: String },
     Status { name: String },
+}
+
+#[derive(Subcommand)]
+enum AskCmd {
+    /// O agente faz uma pergunta (imprime o id; com --wait espera a resposta)
+    Send { name: String, question: String, #[arg(long, value_delimiter = ',')] options: Vec<String>, #[arg(long)] wait: Option<u64> },
+    /// Espera a resposta de uma pergunta
+    Wait { name: String, id: String, #[arg(long, default_value_t = 600)] timeout: u64 },
+    /// Lista as perguntas pendentes (de todas as máquinas, ou de uma)
+    Ls { name: Option<String> },
+    /// Responde uma pergunta
+    Answer { name: String, id: String, text: String },
 }
 
 #[derive(Subcommand)]
@@ -556,6 +572,31 @@ fn run() -> Result<i32> {
                 Some(t) => println!("{}\t{}", if t.done { "devolvido" } else { "pendente" }, t.reason),
                 None => println!("nenhum"),
             },
+        },
+        Cmd::Ask(c) => match c {
+            AskCmd::Send { name, question, options, wait } => {
+                let m = Machine::load(&name)?;
+                let a = ask::send(&m, &question, options)?;
+                match wait {
+                    None => { println!("{}", a.id); eprintln!("responda com: hyzevm ask answer {name} {} <resposta>", a.id); }
+                    Some(secs) => match ask::wait(&m, &a.id, secs)? {
+                        Some(r) => println!("{r}"),
+                        None => { eprintln!("sem resposta ainda (id {}) — espere com: hyzevm ask wait {name} {}", a.id, a.id); return Ok(2); }
+                    },
+                }
+            }
+            AskCmd::Wait { name, id, timeout } => match ask::wait(&Machine::load(&name)?, &id, timeout)? {
+                Some(r) => println!("{r}"),
+                None => { eprintln!("esperando"); return Ok(2); }
+            },
+            AskCmd::Ls { name } => {
+                let ms = match name { Some(n) => vec![Machine::load(&n)?], None => store::list()? };
+                for m in ms { for a in ask::pending(&m) {
+                    let o = if a.options.is_empty() { String::new() } else { format!("  [{}]", a.options.join("/")) };
+                    println!("{}\t{}\t{}{o}", m.name, a.id, a.question);
+                } }
+            }
+            AskCmd::Answer { name, id, text } => { ask::answer(&Machine::load(&name)?, &id, &text)?; ui::ok("resposta enviada ao agente"); }
         },
         Cmd::Skill(SkillCmd::Print) => print!("{}", SKILL_MD),
         Cmd::Skill(SkillCmd::Install { dir }) => {

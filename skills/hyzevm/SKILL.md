@@ -76,6 +76,20 @@ hyzevm takeover wait web --timeout 600     # prints "devolvido" when they hand c
 MCP: `request_takeover`, then `takeover_wait` (call again while it says `esperando`). After it returns,
 run `browser snapshot` — the page has changed. **Do not try to solve CAPTCHAs or evade verification.**
 
+### Questions for decisions (not for blocked screens)
+
+Before anything the user should decide — **publishing, deleting, paying, choosing between options, any
+irreversible step** — ask first and wait. Use `ask` for a decision, `takeover` for a screen you cannot pass.
+
+```bash
+hyzevm ask send web "Post 'Tutorial 03' to Instagram now?" --options yes,no --wait 600   # prints the answer
+hyzevm ask send web "Which caption?"          # prints an id; then: hyzevm ask wait web <id> --timeout 600
+```
+
+Exit code 2 = no answer yet (the question stays pending; keep waiting with `ask wait`). MCP: `ask_human`,
+then `ask_wait`. With `--options`, only those answers are accepted. **Do not act until you have the answer;
+if it is "no", stop.** The user answers in the app, or with `hyzevm ask ls` / `hyzevm ask answer <m> <id> <text>`.
+
 ## 5. Secrets
 
 The user stores secrets once: `hyzevm vault set NAME`, `vault set-file ~/.config/x --from file`.

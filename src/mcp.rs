@@ -1,5 +1,5 @@
 //! Servidor MCP (JSON-RPC por linha, stdio): as mesmas operações do CLI.
-use crate::{browser, desktop, takeover, ops, qemu, share, ssh, store, vault};
+use crate::{ask, browser, desktop, takeover, ops, qemu, share, ssh, store, vault};
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
@@ -54,6 +54,10 @@ fn tools() -> Value {
             json!({"name": {"type":"string"}, "reason": {"type":"string"}}), &["name", "reason"]),
         t("takeover_wait", "Espera o usuário devolver o controle (até timeout_seconds, máx 600). Retorna 'devolvido' ou 'esperando' (chame de novo)",
             json!({"name": {"type":"string"}, "timeout_seconds": {"type":"integer"}}), &["name"]),
+        t("ask_human", "Faz uma pergunta ao usuário e devolve um id. Use ANTES de decisões que ele deve tomar (publicar, apagar, pagar, escolher entre opções). Depois chame ask_wait e NÃO continue até ter a resposta",
+            json!({"name": {"type":"string"}, "question": {"type":"string"}, "options": {"type":"array", "items": {"type":"string"}}}), &["name", "question"]),
+        t("ask_wait", "Espera a resposta do usuário (até timeout_seconds, máx 600). Retorna a resposta ou 'esperando' (chame de novo)",
+            json!({"name": {"type":"string"}, "id": {"type":"string"}, "timeout_seconds": {"type":"integer"}}), &["name", "id"]),
         t("desktop_view_url", "URL para o usuário assistir/controlar a tela no navegador", n, &["name"]),
     ])
 }
@@ -146,6 +150,15 @@ fn call(tool: &str, a: &Value) -> Result<Value> {
         "takeover_wait" => {
             let m = store::Machine::load(s(a, "name")?)?;
             if takeover::wait(&m, a["timeout_seconds"].as_u64().unwrap_or(120).min(600))? { "devolvido: pode continuar (rode browser_snapshot para ver o estado atual)".into() } else { "esperando".into() }
+        }
+        "ask_human" => {
+            let opts: Vec<String> = a["options"].as_array().map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+            let q = ask::send(&store::Machine::load(s(a, "name")?)?, s(a, "question")?, opts)?;
+            format!("Pergunta enviada (id {}). Agora chame ask_wait com esse id e NÃO continue a tarefa até ter a resposta.", q.id)
+        }
+        "ask_wait" => {
+            let m = store::Machine::load(s(a, "name")?)?;
+            match ask::wait(&m, s(a, "id")?, a["timeout_seconds"].as_u64().unwrap_or(120).min(600))? { Some(r) => format!("resposta: {r}"), None => "esperando".into() }
         }
         "desktop_view_url" => desktop::view_url(&live(a)?)?,
         t => return Err(anyhow!("tool desconhecida: {t}")),

@@ -5,6 +5,7 @@ pub mod desktop;
 pub mod doctor;
 pub mod mcp;
 pub mod ops;
+pub mod ask;
 pub mod qemu;
 pub mod service;
 pub mod share;

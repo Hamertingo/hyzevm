@@ -389,7 +389,27 @@ async function refresh(force = false) {
     if (force || sig !== S.sig) { S.sig = sig; render(); if (S.k?.mode === "main") renderKList(); }
   } catch { /* o app ainda está subindo */ }
 }
-function render() { renderTop(); S.view === "focus" ? renderFocus() : renderGrid(); renderInfo(); }
+function render() { renderTop(); S.view === "focus" ? renderFocus() : renderGrid(); renderInfo(); renderAsks(); }
+
+/* perguntas do agente (ask): cartão fixo; só redesenha quando a lista muda, para não perder o texto digitado */
+let asksSig = "";
+function renderAsks() {
+  const all = S.machines.flatMap((m) => (m.asks || []).map((a) => ({ ...a, name: m.name })));
+  const sig = JSON.stringify(all);
+  if (sig === asksSig) return;
+  asksSig = sig;
+  $("#asks").innerHTML = all.slice(0, 3).map((a) => `<div class="ask" data-n="${esc(a.name)}" data-id="${esc(a.id)}">
+      <div class="q"><span class="dot wait"></span><b>${esc(a.name)}</b> pergunta</div><p>${esc(a.question)}</p>
+      ${a.options.length ? `<div class="opts">${a.options.map((o) => `<button class="pill soft" data-ans="${esc(o)}">${esc(o)}</button>`).join("")}</div>`
+        : `<form class="reply"><input placeholder="Sua resposta…" autocomplete="off"><button class="pill solid">Enviar</button></form>`}</div>`).join("");
+}
+async function sendAnswer(card, text) {
+  if (!text.trim()) return;
+  try { await call("ask_answer", { name: card.dataset.n, id: card.dataset.id, text }); toast("Resposta enviada ao agente"); } catch {}
+  refresh(true);
+}
+$("#asks").addEventListener("click", (e) => { const b = e.target.closest("[data-ans]"); if (b) sendAnswer(b.closest(".ask"), b.dataset.ans); });
+$("#asks").addEventListener("submit", (e) => { e.preventDefault(); const f = e.target; sendAnswer(f.closest(".ask"), f.querySelector("input").value); });
 
 async function machineAction(name, action, label) {
   const lbl = label || { start: "ligando…", suspend: "pausando…", stop: "desligando…", force_stop: "desligando…" }[action];

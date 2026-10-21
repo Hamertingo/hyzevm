@@ -4,10 +4,10 @@ if (!window.__TAURI__) {
   window.__FORCE_MAC = true;
   document.addEventListener("DOMContentLoaded", () => document.body.classList.add("web"));
   let machines = [
-    { name: "agente-videos", state: "running", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: true, has_screen: true, ports: [], takeover: "CAPTCHA no login do Instagram", auto_suspend_secs: 0, ssh_port: 1, meta: {} },
-    { name: "agente-pesquisa", state: "running", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: false, has_screen: true, ports: [], takeover: null, auto_suspend_secs: 1800, ssh_port: 2, meta: {} },
-    { name: "build-ci", state: "running", template: "base", cpus: 2, memory_mb: 2048, disk_gb: 32, always_on: false, has_screen: false, ports: [], takeover: null, auto_suspend_secs: 1800, ssh_port: 3, meta: {} },
-    { name: "edicao", state: "paused", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: false, has_screen: true, ports: [], takeover: null, auto_suspend_secs: 1800, ssh_port: 4, meta: {} },
+    { name: "agente-videos", state: "running", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: true, has_screen: true, ports: [], takeover: "CAPTCHA no login do Instagram", asks: [{ id: "a1", question: "Posto o vídeo \"Tutorial 03\" agora no Instagram?", options: ["sim", "não"] }, { id: "a2", question: "Qual legenda uso?", options: [] }], auto_suspend_secs: 0, ssh_port: 1, meta: {} },
+    { name: "agente-pesquisa", state: "running", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: false, has_screen: true, ports: [], takeover: null, asks: [], auto_suspend_secs: 1800, ssh_port: 2, meta: {} },
+    { name: "build-ci", state: "running", template: "base", cpus: 2, memory_mb: 2048, disk_gb: 32, always_on: false, has_screen: false, ports: [], takeover: null, asks: [], auto_suspend_secs: 1800, ssh_port: 3, meta: {} },
+    { name: "edicao", state: "paused", template: "desktop", cpus: 4, memory_mb: 4096, disk_gb: 32, always_on: false, has_screen: true, ports: [], takeover: null, asks: [], auto_suspend_secs: 1800, ssh_port: 4, meta: {} },
   ];
   const svg = (title, accent) => "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800">
     <rect width="1280" height="800" fill="#1b1b1d"/><rect width="1280" height="704" fill="#fff"/><rect width="1280" height="40" fill="#e3e7ee"/>
@@ -36,7 +36,7 @@ if (!window.__TAURI__) {
     },
     create_machine: async ({ req }) => {
       for (const s of ["criando disco", "ligando", "aguardando o boot", "  8s  Started ssh.service"]) { listeners.forEach((f) => f({ payload: { name: req.name, msg: s } })); await wait(800); }
-      machines.push({ name: req.name, state: "running", template: req.template, cpus: req.cpus, memory_mb: req.memory_gb * 1024, disk_gb: req.disk_gb, always_on: req.always_on, has_screen: req.template === "desktop", ports: [], takeover: null, auto_suspend_secs: 1800, ssh_port: 9, meta: {} });
+      machines.push({ name: req.name, state: "running", template: req.template, cpus: req.cpus, memory_mb: req.memory_gb * 1024, disk_gb: req.disk_gb, always_on: req.always_on, has_screen: req.template === "desktop", ports: [], takeover: null, asks: [], auto_suspend_secs: 1800, ssh_port: 9, meta: {} });
       thumbs[req.name] = thumbs["agente-pesquisa"];
     },
     machine_thumb: async ({ name }) => { if (!thumbs[name]) throw "sem tela"; return thumbs[name]; },
@@ -44,6 +44,7 @@ if (!window.__TAURI__) {
     machine_stats: async () => { st.t += 3; return { cpu_total: st.t * 400, cpu_idle: st.t * 400 - st.t * 150, cores: 4, mem_total_mb: 3924, mem_used_mb: 1630, disk_total_gb: 31.2, disk_used_gb: 4.6, uptime_secs: 11540 + st.t }; },
     set_auto_suspend: async ({ name, secs }) => { const m = machines.find((x) => x.name === name); m.auto_suspend_secs = secs; },
     set_always_on: async ({ name, on }) => { const m = machines.find((x) => x.name === name); m.always_on = on; },
+    ask_answer: async ({ name, id }) => { const m = machines.find((x) => x.name === name); m.asks = m.asks.filter((a) => a.id !== id); },
     takeover_done: async ({ name }) => { machines.find((x) => x.name === name).takeover = null; },
     exec: async ({ command }) => ({ code: 0, stdout: command.startsWith("uname") ? "Linux build-ci 6.1.0-44-arm64 aarch64 GNU/Linux\n" : "ok\n", stderr: "" }),
     clipboard_read: async () => "texto do mac", clipboard_write: async () => {}, clipboard_to_vm: async () => 11, clipboard_from_vm: async () => 5,
