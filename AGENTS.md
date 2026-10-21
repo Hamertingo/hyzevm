@@ -91,6 +91,13 @@ create **minimal (Debian puro): ~10 s**, RAM ociosa ~214 MB, retomar de suspend 
 
 `skills/hyzevm/SKILL.md` ensina o agente (Claude Code, Codex…) a usar a máquina: criar/reusar, exec/cp, browser por snapshot, takeover (nunca contornar CAPTCHA/2FA), vault, snapshots, fluxo de postagem. `hyzevm skill install [--dir]` copia para `~/.claude/skills/hyzevm`; `hyzevm skill print` imprime. Embutida no binário (`include_str!`).
 
+## Persistência dos dados
+
+- Tudo da máquina vive em `~/.hyzevm/machines/<nome>/disk.qcow2` (+ `state` de pausa em disco). Sobrevive a pausar, desligar, reiniciar o app/Mac e a queda do QEMU. Some só com `hyzevm rm`/"Remover…".
+- O disco é uma **cópia independente** da imagem (`clone_file`: `cp -c` no APFS = instantâneo e sem gastar espaço; `--reflink=auto` no Linux; cópia comum no Windows). Antes (≤ v0.1.1) era uma camada sobre `images/tpl-*.qcow2`/`debian-12-*.qcow2`: apagar ou refazer a imagem quebrava/corrompia as máquinas. `ensure_standalone` achata máquinas antigas no próximo boot (testado: dados preservados; imagem-base removida e a máquina continua ligando).
+- Perfil do Chromium em `~/.config/hyze-chromium` (dentro do disco). Atenção ao bug antigo do atalho da dock (`%h`): máquinas criadas antes da correção abriam o Chromium com perfil em `/.config` (inexistente) = sem persistência; corrigir com os arquivos `hyze-chromium`/`hyze-session` e reabrir o navegador.
+- Cache de disco `writeback` respeita flush do guest; `stop --force`/`quit` equivale a puxar o cabo (ext4 recupera pelo journal). Volumes (`/data/<nome>`) e snapshots são arquivos independentes.
+
 ## Teclado e área de transferência na VM (controle assumido)
 
 - **Caps Lock não é encaminhado**: o case já vem em `e.key` e x11vnc aplica Shift; encaminhar a tecla invertia duas vezes (letras saíam minúsculas). `screen_ws` desliga um Caps preso na VM ao conectar.

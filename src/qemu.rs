@@ -42,21 +42,56 @@ fn uefi_firmware() -> Result<Option<PathBuf>> {
         .context("firmware UEFI arm64 não encontrado (instale qemu-efi-aarch64 / o pacote completo do QEMU)")
 }
 
-/// Disco novo em cima de `backing`. Nunca menor que o virtual size do backing
+/// Copia `src` para `dst` como arquivo independente. Em APFS/btrfs/XFS é um clone instantâneo (copy-on-write,
+/// sem gastar espaço até divergir); em outros sistemas de arquivos é uma cópia comum.
+fn clone_file(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    let _ = std::fs::remove_file(dst);
+    let fast = if cfg!(target_os = "macos") { Command::new("cp").arg("-c").arg(src).arg(dst).stderr(Stdio::null()).status() }
+        else if cfg!(target_os = "linux") { Command::new("cp").args(["--reflink=auto"]).arg(src).arg(dst).stderr(Stdio::null()).status() }
+        else { Err(std::io::Error::other("sem clone")) };
+    if fast.map(|s| s.success()).unwrap_or(false) { return Ok(()); }
+    std::fs::copy(src, dst).with_context(|| format!("não consegui copiar {}", src.display()))?;
+    Ok(())
+}
+
+fn virtual_size(p: &std::path::Path) -> u64 {
+    qemu_img().ok().and_then(|q| Command::new(q).args(["info", "--output=json", "-U"]).arg(p).output().ok())
+        .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok())
+        .and_then(|v| v["virtual-size"].as_u64()).unwrap_or(0)
+}
+
+/// Disco da máquina: uma cópia **independente** da imagem (não uma camada em cima dela). Assim apagar,
+/// refazer ou atualizar a imagem-base nunca estraga uma máquina que já existe. Nunca menor que a imagem
 /// (um disco menor corta a partição raiz e o guest não boota).
 pub fn create_disk(m: &Machine, backing: &std::path::Path) -> Result<()> {
-    let info = Command::new(qemu_img()?).args(["info", "--output=json"]).arg(backing).output()?;
-    let virt: u64 = serde_json::from_slice::<Value>(&info.stdout).ok()
-        .and_then(|v| v["virtual-size"].as_u64()).unwrap_or(0);
+    let virt = virtual_size(backing);
     let want = (m.disk_gb as u64) << 30;
     let gb = if virt > want {
         let g = virt.div_ceil(1 << 30);
         crate::ui::warn(&format!("disco de {} GB é menor que a imagem ({g} GB) — usando {g} GB", m.disk_gb));
         g
     } else { m.disk_gb as u64 };
-    let st = Command::new(qemu_img()?).args(["create", "-f", "qcow2", "-F", "qcow2", "-b"])
-        .arg(backing).arg(m.disk()).arg(format!("{gb}G")).stdout(Stdio::null()).status()?;
-    if !st.success() { bail!("qemu-img create falhou"); }
+    clone_file(backing, &m.disk())?;
+    if gb << 30 > virt {
+        let st = Command::new(qemu_img()?).args(["resize", "-q"]).arg(m.disk()).arg(format!("{gb}G")).status()?;
+        if !st.success() { bail!("qemu-img resize falhou"); }
+    }
+    Ok(())
+}
+
+/// Máquinas criadas por versões antigas têm o disco "em camadas" sobre uma imagem-base. Antes de ligar
+/// (QEMU parado), copia os dados da base para dentro do disco: daí em diante ele não depende de mais nada.
+pub fn ensure_standalone(m: &Machine) -> Result<()> {
+    let q = qemu_img()?;
+    let o = Command::new(&q).args(["info", "--output=json"]).arg(m.disk()).output()?;
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap_or(Value::Null);
+    let Some(backing) = v["full-backing-filename"].as_str().or(v["backing-filename"].as_str()) else { return Ok(()) };
+    if !std::path::Path::new(backing).exists() {
+        bail!("o disco de {} depende de {backing}, que não existe mais — recrie a máquina (ou restaure esse arquivo)", m.name);
+    }
+    crate::ui::step(&format!("{}: tornando o disco independente da imagem-base (uma vez só)…", m.name));
+    let st = Command::new(&q).args(["rebase", "-q", "-f", "qcow2", "-b", ""]).arg(m.disk()).status()?;
+    if !st.success() { bail!("qemu-img rebase falhou"); }
     Ok(())
 }
 
@@ -82,6 +117,7 @@ pub fn start(m: &Machine) -> Result<Started> {
         return Ok(Started::Already);
     }
     let _ = std::fs::remove_file(live_marker(m)); // sobra de um QEMU que morreu pausado
+    if !m.dir().join("suspended").exists() { ensure_standalone(m)?; } // estado salvo em disco: só depois de um boot limpo
     let suspended = m.dir().join("suspended").exists();
     let mut a: Vec<String> = vec![];
     let mut push = |s: &[&str]| a.extend(s.iter().map(|x| x.to_string()));
