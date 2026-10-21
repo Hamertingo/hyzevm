@@ -141,7 +141,9 @@ pub fn list() -> Result<Vec<Machine>> {
     let mut v = vec![];
     if let Ok(rd) = std::fs::read_dir(machines_dir()) {
         for e in rd.flatten() {
-            if let Ok(m) = Machine::load(&e.file_name().to_string_lossy()) { v.push(m); }
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.starts_with('_') { continue; } // máquinas internas (ex.: _build-desktop, o construtor de imagens)
+            if let Ok(m) = Machine::load(&n) { v.push(m); }
         }
     }
     v.sort_by(|a, b| a.name.cmp(&b.name));

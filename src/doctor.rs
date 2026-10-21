@@ -19,6 +19,12 @@ pub fn checks() -> Vec<(String, bool, String)> {
         }
         Err(e) => add(&format!("qemu-system-{arch}"), false, e.to_string()),
     }
+    #[cfg(windows)]
+    {
+        let hv = Command::new("powershell").args(["-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystem).HypervisorPresent"]).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().eq_ignore_ascii_case("true")).unwrap_or(false);
+        add("Plataforma do Hipervisor", hv, if hv { "ativa".into() } else { "desativada: ative “Plataforma do Hipervisor do Windows” nos recursos do Windows e reinicie".into() });
+    }
     match qemu::uefi_check() { Ok(d) => add("firmware UEFI", true, d), Err(e) => add("firmware UEFI", false, e.to_string()) }
     for t in ["ssh", "ssh-keygen", "scp", "curl"] {
         let ok = Command::new(t).arg("-V").output().is_ok() || Command::new(t).arg("--version").output().is_ok();

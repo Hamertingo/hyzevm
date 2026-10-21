@@ -162,7 +162,10 @@ pub fn start(m: &Machine) -> Result<Started> {
 
     let t = Instant::now();
     while !is_running(m) {
-        if t.elapsed() > Duration::from_secs(20) { bail!("QEMU não subiu em 20s:\n{}", std::fs::read_to_string(m.dir().join("qemu.log")).unwrap_or_default()); }
+        if t.elapsed() > Duration::from_secs(20) {
+            let log = std::fs::read_to_string(m.dir().join("qemu.log")).unwrap_or_default();
+            bail!("QEMU não subiu em 20s:\n{}{}", log, accel_hint(&log));
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
     if suspended {
@@ -275,4 +278,19 @@ pub fn hostfwd(m: &Machine, add: bool, host: u16, guest: u16) -> Result<()> {
     let out = hmp(m, &c)?;
     if !out.trim().is_empty() { bail!("{}", out.trim()); }
     Ok(())
+}
+
+/// Explica em português os erros de aceleração mais comuns (o texto do QEMU engana: "No space left on device"
+/// no WHPX quer dizer que a Plataforma do Hipervisor não está ativa, não que falta disco).
+fn accel_hint(log: &str) -> String {
+    let l = log.to_lowercase();
+    if l.contains("whpx") {
+        return "\n→ A aceleração do Windows (WHPX) não está ativa. Ative “Plataforma do Hipervisor do Windows” em \
+            Painel de Controle > Programas > Ativar ou desativar recursos do Windows (ou, no PowerShell como administrador: \
+            Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All) e REINICIE o computador. \
+            O texto “No space left on device” acima é enganoso: não é falta de disco.\n".into();
+    }
+    if l.contains("kvm") { return "\n→ KVM indisponível: confira /dev/kvm e se seu usuário está no grupo kvm (sudo usermod -aG kvm $USER; reinicie a sessão).\n".into(); }
+    if l.contains("hvf") { return "\n→ HVF indisponível: o macOS precisa permitir o Hypervisor (Apple Silicon ou Intel com VT-x).\n".into(); }
+    String::new()
 }
