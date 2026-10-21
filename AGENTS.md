@@ -112,6 +112,10 @@ create **minimal (Debian puro): ~10 s**, RAM ociosa ~214 MB, retomar de suspend 
 - Release: `./scripts/release.sh 0.1.1` (bump em Cargo.toml e app/Cargo.toml, tag, push) → CI publica 5 binários, `HyzeVM-macos-arm64.zip` e `SHA256SUMS.txt`.
 - Fuso/idioma: copiados do computador na criação (`store::host_timezone/host_lang`) → cloud-init `timezone:` + `/etc/hyze-lang`; Chromium usa `--lang`/`--accept-lang` (helper `/usr/local/bin/hyze-chromium`, mesmo perfil/porta do `hyzevm browser`). `hyzevm locale <m>` ajusta uma existente. Bug corrigido: o atalho do Chromium na dock usava `%h` (não existe em .desktop → perfil em `/.config`).
 
+## App no Windows
+
+CI (`app-windows`) gera `HyzeVM-windows-x64-setup.exe` (NSIS, `installer/windows.nsi`, por usuário em `%LOCALAPPDATA%\Programs\HyzeVM`, atalhos no Menu Iniciar/Desktop) com o app (`hyzevm-desktop.exe`) + a CLI (`hyzevm.exe`). NUNCA chamar o app de `hyzevm.exe`/`HyzeVM.exe`: FS case-insensitive (mesma colisão do macOS). `hide_child_consoles` (app/src/main.rs) cria console oculto para ssh/qemu-img filhos não piscarem janelas. **Não verificado:** build e execução no Windows (nada rodou lá); sem auto-update do app no Windows.
+
 ## Roadmap
 
 1. Imagens `base`/`desktop` prontas nos releases do CI (baixar em vez de construir)

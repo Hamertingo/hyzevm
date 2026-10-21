@@ -304,7 +304,18 @@ async fn doctor_report() -> R<Vec<Check>> {
     blocking(|| Ok(doctor::checks().into_iter().map(|(name, ok, detail)| Check { name, ok, detail }).collect())).await
 }
 
+/// Windows: app GUI sem console faria cada ssh/qemu-img filho abrir uma janela preta piscando.
+/// Cria um console oculto que os filhos herdam.
+#[cfg(windows)]
+fn hide_child_consoles() {
+    #[link(name = "kernel32")] extern "system" { fn AllocConsole() -> i32; fn GetConsoleWindow() -> isize; }
+    #[link(name = "user32")] extern "system" { fn ShowWindow(h: isize, cmd: i32) -> i32; }
+    unsafe { if AllocConsole() != 0 { let w = GetConsoleWindow(); if w != 0 { ShowWindow(w, 0); } } }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if !std::env::args().nth(1).is_some_and(|a| a.starts_with('_')) { hide_child_consoles(); }
     // Processos auxiliares (vigia e gateway) são esta mesma binária chamada com argumentos.
     let a: Vec<String> = std::env::args().collect();
     match a.get(1).map(|s| s.as_str()) {
