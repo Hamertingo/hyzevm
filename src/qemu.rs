@@ -22,7 +22,7 @@ fn find_bin(name: &str) -> Result<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
     for d in ["/opt/homebrew/bin", "/usr/local/bin", "C:\\Program Files\\qemu"] { dirs.push(d.into()); }
     dirs.into_iter().map(|d| d.join(&exe)).find(|p| p.is_file()).with_context(|| {
-        format!("{name} não encontrado — instale o QEMU (macOS: brew install qemu · Linux: apt install qemu-system qemu-utils · Windows: winget install SoftwareFreedomConservancy.QEMU)")
+        format!("{name} não encontrado — instale o QEMU (macOS: brew install qemu · Linux: apt install qemu-system qemu-utils · Windows: winget install --id SoftwareFreedomConservancy.QEMU -e)")
     })
 }
 

@@ -22,7 +22,7 @@ Precisa do [QEMU](https://www.qemu.org/) e do cliente OpenSSH:
 ```bash
 brew install qemu                     # macOS
 sudo apt install qemu-system qemu-utils qemu-efi-aarch64 openssh-client   # Debian/Ubuntu
-winget install SoftwareFreedomConservancy.QEMU                            # Windows
+winget install --id SoftwareFreedomConservancy.QEMU -e                            # Windows
 cargo install --git https://github.com/Hamertingo/hyzevm hyzevm
 hyzevm doctor
 ```

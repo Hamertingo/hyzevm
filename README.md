@@ -51,7 +51,7 @@ brew install qemu
 # Debian/Ubuntu
 sudo apt install qemu-system qemu-utils qemu-efi-aarch64 openssh-client
 # Windows
-winget install SoftwareFreedomConservancy.QEMU
+winget install --id SoftwareFreedomConservancy.QEMU -e
 ```
 
 ```bash
